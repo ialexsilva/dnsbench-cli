@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Publish Release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+
+    env:
+      TAG_NAME: ${{ github.event.workflow_run.head_branch }}
+      TARGET_COMMITISH: ${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set Up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Release Binaries
+        run: |
+          CGO_ENABLED=0 make build GOOS=darwin GOARCH=arm64
+          CGO_ENABLED=0 make build GOOS=darwin GOARCH=amd64
+          CGO_ENABLED=0 make build GOOS=linux GOARCH=amd64
+          CGO_ENABLED=0 make build GOOS=windows GOARCH=amd64
+
+      - name: Package Release Assets
+        run: |
+          mkdir dist
+          tar -C releases/darwin/arm64 -czf dist/dnsbench-darwin-arm64.tar.gz dnsbench
+          tar -C releases/darwin/amd64 -czf dist/dnsbench-darwin-amd64.tar.gz dnsbench
+          tar -C releases/linux/amd64 -czf dist/dnsbench-linux-amd64.tar.gz dnsbench
+          zip -j dist/dnsbench-windows-amd64.zip releases/windows/amd64/dnsbench.exe
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG_NAME" dist/* --target "$TARGET_COMMITISH" --generate-notes
