@@ -30,6 +30,20 @@ building:
 go run ./cmd/dnsbench --help
 ```
 
+### macOS: allowing the binary to run
+
+Prebuilt release binaries are not signed with an Apple Developer ID, so on the
+first run macOS Gatekeeper may report that it "cannot verify dnsbench is free of
+malware". This is expected for unsigned command-line tools; clear the quarantine
+attribute once and the binary runs normally:
+
+```sh
+xattr -dr com.apple.quarantine ./dnsbench
+```
+
+Binaries produced locally with `make build` on macOS are ad-hoc signed
+automatically and do not trigger this warning.
+
 ## Quick start
 
 ```sh
