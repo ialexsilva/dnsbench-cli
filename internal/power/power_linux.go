@@ -34,9 +34,7 @@ func Acquire() (func(), error) {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			if lock != nil {
-				_ = lock.Close() // closing the fd releases the lock
-			}
+			_ = lock.Close() // closing the fd releases the lock
 			_ = conn.Close()
 		})
 	}, nil

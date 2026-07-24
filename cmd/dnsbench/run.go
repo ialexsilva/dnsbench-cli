@@ -129,10 +129,10 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 	ctx, cleanup := interruptibleContext(errOut)
 	defer cleanup()
 	if !f.noKeepAwake {
-		release, err := power.Acquire()
+		release, awakeErr := power.Acquire()
 		defer release()
-		if err != nil && !f.quiet {
-			fmt.Fprintln(errOut, "notice: could not prevent system sleep during the run: "+err.Error())
+		if awakeErr != nil && !f.quiet {
+			fmt.Fprintln(errOut, "notice: could not prevent system sleep during the run: "+awakeErr.Error())
 		}
 	}
 	if !f.quiet {

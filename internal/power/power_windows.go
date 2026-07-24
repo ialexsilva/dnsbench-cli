@@ -28,21 +28,17 @@ func Acquire() (func(), error) {
 	}
 	release := make(chan struct{})
 	cleared := make(chan struct{})
-	ready := make(chan bool, 1)
+	requested := make(chan struct{})
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		r, _, _ := proc.Call(uintptr(esContinuous | esSystemRequired))
-		ready <- r != 0
+		proc.Call(uintptr(esContinuous | esSystemRequired))
+		close(requested)
 		<-release
 		proc.Call(uintptr(esContinuous)) // clear the request, letting the OS sleep again
 		close(cleared)
 	}()
-	if !<-ready {
-		close(release)
-		<-cleared
-		return func() {}, fmt.Errorf("SetThreadExecutionState did not set the request")
-	}
+	<-requested
 	var once sync.Once
 	return func() {
 		once.Do(func() {
