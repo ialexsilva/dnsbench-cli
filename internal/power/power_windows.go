@@ -3,7 +3,7 @@
 package power
 
 import (
-	"context"
+	"fmt"
 	"runtime"
 	"sync"
 
@@ -15,31 +15,39 @@ const (
 	esSystemRequired = 0x00000001
 )
 
-// KeepAwake calls SetThreadExecutionState with ES_CONTINUOUS|ES_SYSTEM_REQUIRED,
+// Acquire calls SetThreadExecutionState with ES_CONTINUOUS|ES_SYSTEM_REQUIRED,
 // the canonical Windows API for signalling that the machine is in use. The
-// execution state is per-thread, so both the request and its later clear run on
-// a single OS-locked thread that stays alive until release.
-func KeepAwake(_ context.Context) (release func(), active bool, detail string) {
+// execution state is per-thread, so the request and its later clear both run on
+// a single OS-locked thread that stays alive until release. release blocks until
+// the request has actually been cleared, matching the synchronous behaviour of
+// the other platforms.
+func Acquire() (func(), error) {
 	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("SetThreadExecutionState")
 	if err := proc.Find(); err != nil {
-		return func() {}, false, "SetThreadExecutionState unavailable; the system may sleep during the run"
+		return func() {}, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
-	done := make(chan struct{})
+	release := make(chan struct{})
+	cleared := make(chan struct{})
 	ready := make(chan bool, 1)
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		r, _, _ := proc.Call(uintptr(esContinuous | esSystemRequired))
 		ready <- r != 0
-		<-done
+		<-release
 		proc.Call(uintptr(esContinuous)) // clear the request, letting the OS sleep again
+		close(cleared)
 	}()
 	if !<-ready {
-		close(done)
-		return func() {}, false, "SetThreadExecutionState failed; the system may sleep during the run"
+		close(release)
+		<-cleared
+		return func() {}, fmt.Errorf("SetThreadExecutionState did not set the request")
 	}
 	var once sync.Once
 	return func() {
-		once.Do(func() { close(done) })
-	}, true, ""
+		once.Do(func() {
+			close(release)
+			<-cleared // block until the request is actually cleared
+		})
+	}, nil
 }

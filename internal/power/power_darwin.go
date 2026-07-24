@@ -3,25 +3,27 @@
 package power
 
 import (
-	"context"
+	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"sync"
 )
 
-// KeepAwake shells out to caffeinate, the macOS tool that wraps the IOKit
-// power-assertion API. The -i flag asserts PreventUserIdleSystemSleep and -w
-// ties the helper's lifetime to this process, so caffeinate also exits if we
-// crash without calling release.
-func KeepAwake(_ context.Context) (release func(), active bool, detail string) {
-	path, err := exec.LookPath("caffeinate")
+// lookPath is a seam so tests can exercise the "mechanism missing" path.
+var lookPath = exec.LookPath
+
+// Acquire shells out to caffeinate, the macOS tool that wraps the IOKit
+// power-assertion API. See caffeinateArgs for the flags. Because caffeinate is
+// started with -w <pid>, it also exits on its own if this process dies without
+// calling release, so the assertion never outlives us.
+func Acquire() (func(), error) {
+	path, err := lookPath("caffeinate")
 	if err != nil {
-		return func() {}, false, "caffeinate not found; the system may sleep during the run"
+		return func() {}, fmt.Errorf("%w: caffeinate not found", ErrUnsupported)
 	}
-	cmd := exec.Command(path, "-i", "-w", strconv.Itoa(os.Getpid()))
+	cmd := exec.Command(path, caffeinateArgs(os.Getpid())...)
 	if err := cmd.Start(); err != nil {
-		return func() {}, false, "could not start caffeinate: " + err.Error()
+		return func() {}, fmt.Errorf("start caffeinate: %w", err)
 	}
 	var once sync.Once
 	return func() {
@@ -29,5 +31,5 @@ func KeepAwake(_ context.Context) (release func(), active bool, detail string) {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		})
-	}, true, ""
+	}, nil
 }

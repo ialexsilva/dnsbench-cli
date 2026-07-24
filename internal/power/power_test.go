@@ -1,17 +1,12 @@
 package power
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
-func TestKeepAwakeReturnsUsableRelease(t *testing.T) {
-	release, _, detail := KeepAwake(context.Background())
+func TestAcquireReturnsUsableRelease(t *testing.T) {
+	release, _ := Acquire()
 	if release == nil {
-		t.Fatal("KeepAwake returned a nil release function")
+		t.Fatal("Acquire returned a nil release function")
 	}
-	// release must be safe to call more than once.
 	release()
-	release()
-	_ = detail
+	release() // must be safe to call more than once
 }

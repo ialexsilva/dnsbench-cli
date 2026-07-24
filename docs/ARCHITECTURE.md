@@ -15,10 +15,11 @@
 | `internal/rank` | Score computation (weighted base + penalties), rank assignment, presets and paired bootstrap score comparisons |
 | `internal/report` | Factual DNS/run/comparison sections and exporters for JSON, CSV, TXT and a self-contained HTML report (with an embedded SVG chart) |
 | `internal/ui` | Terminal rendering: tables, result chart, neutral overview card, formatting, colors, live progress view |
+| `internal/power` | Best-effort, per-OS inhibition of system idle sleep during a run (caffeinate on macOS, a systemd-logind D-Bus lock on Linux, `SetThreadExecutionState` on Windows); no-op elsewhere |
 
 ## Dependency arrows
 
-Arrows point from importer to imported. Every internal package depends on `model`; only `probe` and `bench` depend on `transport`; `cmd/dnsbench` depends on everything except `transport` (it passes `nil` factories and lets `probe`/`bench` default to `transport.New`).
+Arrows point from importer to imported. Every internal package except `power` depends on `model`; `power` is a standalone leaf that imports only the standard library and its OS bindings. Only `probe` and `bench` depend on `transport`; `cmd/dnsbench` depends on everything except `transport` (it passes `nil` factories and lets `probe`/`bench` default to `transport.New`).
 
 ```
                           cmd/dnsbench

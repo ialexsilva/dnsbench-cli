@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.39.0
