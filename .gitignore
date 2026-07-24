@@ -1,0 +1,14 @@
+# Build artifacts
+/releases/
+
+# Generated benchmark reports
+/dnsbench-*.html
+/reports/
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
