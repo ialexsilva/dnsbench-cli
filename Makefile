@@ -10,3 +10,4 @@ OUTPUT := $(BUILD_DIR)/$(GOOS)/$(GOARCH)/$(BINARY)$(BINARY_EXT)
 build:
 	@mkdir -p $(dir $(OUTPUT))
 	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(OUTPUT) ./cmd/dnsbench
+	@if [ "$(GOOS)" = "darwin" ] && command -v codesign >/dev/null 2>&1; then codesign --force --sign - "$(OUTPUT)"; fi
