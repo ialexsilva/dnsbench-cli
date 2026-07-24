@@ -18,6 +18,7 @@ import (
 
 	"dnsbench/internal/bench"
 	"dnsbench/internal/model"
+	"dnsbench/internal/power"
 	"dnsbench/internal/probe"
 	"dnsbench/internal/rank"
 	"dnsbench/internal/report"
@@ -58,6 +59,7 @@ type runFlags struct {
 	prefix          string
 	includeRaw      bool
 	open            bool
+	noKeepAwake     bool
 }
 
 func newRunCmd() *cobra.Command {
@@ -108,6 +110,7 @@ time of day.`,
 	cmd.Flags().StringVar(&f.prefix, "prefix", "dnsbench", "file name prefix for exported reports")
 	cmd.Flags().BoolVar(&f.includeRaw, "include-raw", false, "include raw samples in the JSON export")
 	cmd.Flags().BoolVar(&f.open, "open", false, "open the HTML report in your browser when the run finishes (implies --export html)")
+	cmd.Flags().BoolVar(&f.noKeepAwake, "no-keep-awake", false, "do not prevent the system from sleeping during the run")
 	return cmd
 }
 
@@ -125,6 +128,13 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 	errOut := cmd.ErrOrStderr()
 	ctx, cleanup := interruptibleContext(errOut)
 	defer cleanup()
+	if !f.noKeepAwake {
+		release, active, detail := power.KeepAwake(ctx)
+		defer release()
+		if !active && detail != "" && !f.quiet {
+			fmt.Fprintln(errOut, "notice: "+detail)
+		}
+	}
 	if !f.quiet {
 		printRunHeader(out)
 	}

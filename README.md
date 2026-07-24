@@ -109,6 +109,8 @@ For a full, shareable report use `--export html`, or `--open`, which writes the 
 
 dnsbench spaces its query launches with a single global pacer (`--pace`, default 20ms) and reuses one connected socket per server, so a run does not flood the local Wi-Fi link, NAT router or uplink and then misread the resulting drops as server loss. The pace adapts while the run progresses: it shortens on clean networks and, when timeouts appear across several servers at once (the signature of local congestion rather than of any one server), it eases off automatically and notes the adjustment in the live view. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details.
 
+While a run is in progress dnsbench also asks the operating system not to enter idle sleep, so leaving the machine unattended (or letting the display turn off) does not suspend the process mid-run and poison the timings. It uses the native mechanism of each platform — `caffeinate` on macOS, a `systemd-inhibit` idle lock on Linux and `SetThreadExecutionState` on Windows — and covers system sleep only, so the display still turns off as usual. Pass `--no-keep-awake` to disable it. Where no mechanism is available the run continues and prints a notice.
+
 ## Supported platforms and DNS discovery
 
 dnsbench runs on macOS, Linux and Windows. System DNS discovery is read-only and works differently on each platform:
