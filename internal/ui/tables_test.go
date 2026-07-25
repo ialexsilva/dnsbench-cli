@@ -116,26 +116,3 @@ func TestRenderMetricsTableCells(t *testing.T) {
 		}
 	}
 }
-
-func TestRenderScoreTable(t *testing.T) {
-	disableColors(t)
-	out := RenderScoreTable(chartFixture(), model.RankLatency)
-	for _, want := range []string{
-		"rank", "server", "base", "+loss", "total",
-		"Cloudflare", "Quad9 Secure", "Google Public DNS",
-		"10.1 ms", "3.0 ms", "18.0 ms",
-		"score = median latency",
-		"cached ×0.70", "recursive/TLD ×0.30",
-		"loss ×2.0 ms per %",
-		"no DNSSEC +10.0 ms",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("score table missing %q\n%s", want, out)
-		}
-	}
-	cf := strings.Index(out, "Cloudflare")
-	gg := strings.Index(out, "Google Public DNS")
-	if !(cf < gg) {
-		t.Errorf("score order wrong: cf=%d goog=%d\n%s", cf, gg, out)
-	}
-}

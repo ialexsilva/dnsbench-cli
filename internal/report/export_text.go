@@ -26,6 +26,7 @@ func ExportText(w io.Writer, res *model.RunResult) error {
 		cfg.Mode, cfg.Rounds, categoryList(cfg.Categories), cfg.Timeout, cfg.Session, cfg.Seed)
 	sel := selectedMode(res)
 	fmt.Fprintf(&b, "Ranking mode: %s\n", sel.Label())
+	b.WriteString("Latency cost: weighted latency plus penalties, in ms — lower is better\n")
 	if wts, ok := res.Weights[sel]; ok {
 		b.WriteString(weightsLine(wts))
 	}
@@ -85,8 +86,8 @@ func summaryTable(res *model.RunResult, sel model.RankMode) string {
 	for _, cat := range cats {
 		fmt.Fprintf(&b, " %-20s", cat.Label()+" med ms")
 	}
-	fmt.Fprintf(&b, " %-8s %-10s\n", "Loss %", "Score ms")
-	width := 24 + 1 + 18 + len(cats)*21 + 1 + 8 + 1 + 10
+	fmt.Fprintf(&b, " %-8s %-15s\n", "Loss %", "Latency cost ms")
+	width := 24 + 1 + 18 + len(cats)*21 + 1 + 8 + 1 + 15
 	b.WriteString(strings.Repeat("-", width) + "\n")
 	for i := range res.Servers {
 		s := &res.Servers[i]
@@ -114,7 +115,7 @@ func summaryTable(res *model.RunResult, sel model.RankMode) string {
 		if v, ok := scoreByID[s.ID]; ok {
 			score = fmt.Sprintf("%.1f", v)
 		}
-		fmt.Fprintf(&b, " %-8s %-10s\n", loss, score)
+		fmt.Fprintf(&b, " %-8s %-15s\n", loss, score)
 	}
 	return b.String()
 }

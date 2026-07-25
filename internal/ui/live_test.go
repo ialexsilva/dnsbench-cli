@@ -352,7 +352,8 @@ func TestLiveNonLatencySortDescriptions(t *testing.T) {
 	for sortKey, want := range map[string]string{
 		"loss":  "live order: loss · bars: median latency",
 		"name":  "live order: name · bars: median latency",
-		"score": "live order: median latency · final score after benchmark",
+		"cost":  "live order: median latency · final latency cost after benchmark",
+		"score": "live order: median latency · final latency cost after benchmark",
 	} {
 		t.Run(sortKey, func(t *testing.T) {
 			l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, sortKey)

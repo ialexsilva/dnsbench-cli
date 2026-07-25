@@ -193,10 +193,10 @@ func writeHTMLVerdict(b *strings.Builder, res *model.RunResult, sel model.RankMo
 		return
 	}
 	b.WriteString("<section class=\"verdict\">\n")
-	fmt.Fprintf(b, "<p class=\"vlabel\">Fastest resolver on this network — %s ranking</p>\n", esc(sel.Label()))
+	fmt.Fprintf(b, "<p class=\"vlabel\">Top-ranked resolver on this network — %s ranking</p>\n", esc(sel.Label()))
 	fmt.Fprintf(b, "<div class=\"vname\">%s<span class=\"vendpoint\">%s</span></div>\n", esc(ws.DisplayName()), esc(ws.Endpoint()))
 
-	figures := []string{fmt.Sprintf("score <b>%.1f ms</b>", winner.TotalMs)}
+	figures := []string{fmt.Sprintf("latency cost <b>%.1f ms</b>", winner.TotalMs)}
 	if st := res.Stats[winner.ServerID]; st != nil {
 		cats := res.Config.Categories
 		if len(cats) == 0 {
@@ -235,9 +235,9 @@ func currentDNSLine(res *model.RunResult, ranked []model.Score) string {
 		}
 		name := esc(displayNameByID(res, sc.ServerID))
 		if sc.Rank == 1 {
-			return fmt.Sprintf("Your current DNS — <b>%s</b> — is already the fastest measured choice on this network.", name)
+			return fmt.Sprintf("Your current DNS — <b>%s</b> — is already the top-ranked measured choice on this network.", name)
 		}
-		line := fmt.Sprintf("Your current DNS — <b>%s</b> — ranked #%d of %d with score %.1f ms", name, sc.Rank, len(ranked), sc.TotalMs)
+		line := fmt.Sprintf("Your current DNS — <b>%s</b> — ranked #%d of %d with latency cost %.1f ms", name, sc.Rank, len(ranked), sc.TotalMs)
 		if ranked[0].TotalMs > 0 {
 			ratio := sc.TotalMs / ranked[0].TotalMs
 			if ratio >= 1.05 {
@@ -273,7 +273,7 @@ func writeHTMLRanking(b *strings.Builder, res *model.RunResult, sel model.RankMo
 	for _, c := range cats {
 		fmt.Fprintf(b, "<th class=\"num\">%s med</th>", esc(c.Label()))
 	}
-	b.WriteString("<th class=\"num\">loss</th><th class=\"num\">score</th><th>score scale</th></tr></thead>\n<tbody>\n")
+	b.WriteString("<th class=\"num\">loss</th><th class=\"num\">latency cost<br><small>ms, lower is better</small></th><th>relative cost</th></tr></thead>\n<tbody>\n")
 	for _, sc := range ranked {
 		st := res.Stats[sc.ServerID]
 		rowClass := ""
@@ -311,7 +311,7 @@ func writeHTMLRanking(b *strings.Builder, res *model.RunResult, sel model.RankMo
 		fmt.Fprintf(b, "<td class=\"meter\"><span class=\"track\"><span class=\"fill\" style=\"width:%.0f%%\"></span></span></td></tr>\n", pct)
 	}
 	b.WriteString("</tbody></table></div>\n")
-	b.WriteString("<p class=\"tablenote\">score in milliseconds — lower is better, shorter bar wins · medians in ms</p>\n")
+	b.WriteString("<p class=\"tablenote\">shorter cost bar is better · category medians in ms</p>\n")
 	writeHTMLSidelined(b, res)
 	b.WriteString("</section>\n")
 }
@@ -359,7 +359,7 @@ func writeHTMLScores(b *strings.Builder, res *model.RunResult, sel model.RankMod
 		return
 	}
 	keys := presentHTMLPenaltyKeys(ranked)
-	fmt.Fprintf(b, "<section>\n<h2>Score breakdown — %s</h2>\n", esc(sel.Label()))
+	fmt.Fprintf(b, "<section>\n<h2>Latency cost breakdown — %s</h2>\n", esc(sel.Label()))
 	b.WriteString("<div class=\"tablewrap\"><table>\n<thead><tr><th class=\"num\">#</th><th>resolver</th><th class=\"num\">base</th>")
 	for _, k := range keys {
 		fmt.Fprintf(b, "<th class=\"num\">+%s</th>", esc(k))

@@ -43,8 +43,18 @@ func RenderRankingList(res *model.RunResult, mode model.RankMode, tieA, tieB str
 	var b strings.Builder
 	scores := sortedScores(res, mode)
 	system := systemIDSet(res)
-	b.WriteString(Bold("Ranked by "+mode.Label()) + Gray(" — score in ms, lower is better") + "\n")
-	writeRankingLegend(&b, scores, system, tieA)
+	shown := min(len(scores), rankTopN)
+	hidden := scores[shown:]
+	var hiddenSystem []model.Score
+	for _, sc := range hidden {
+		if system[sc.ServerID] {
+			hiddenSystem = append(hiddenSystem, sc)
+		}
+	}
+	visible := append(append([]model.Score{}, scores[:shown]...), hiddenSystem...)
+
+	b.WriteString(Bold("Ranked by "+mode.Label()) + Gray(" — latency cost in ms, lower is better") + "\n")
+	writeRankingLegend(&b, visible, system, tieA)
 	if len(scores) == 0 {
 		b.WriteString(Gray("  no servers completed the benchmark") + "\n")
 		b.WriteString(renderUnrankedSummary(res, 0))
@@ -58,16 +68,8 @@ func RenderRankingList(res *model.RunResult, mode model.RankMode, tieA, tieB str
 		}
 	}
 	cats := displayCategories(res)
-	shown := min(len(scores), rankTopN)
 	for _, sc := range scores[:shown] {
 		b.WriteString(rankingRow(res, sc, best, worst, cats, system, tieA, tieB) + "\n")
-	}
-	hidden := scores[shown:]
-	var hiddenSystem []model.Score
-	for _, sc := range hidden {
-		if system[sc.ServerID] {
-			hiddenSystem = append(hiddenSystem, sc)
-		}
 	}
 	if len(hiddenSystem) > 0 {
 		b.WriteString(Gray("   ⋮") + "\n")
@@ -84,10 +86,13 @@ func RenderRankingList(res *model.RunResult, mode model.RankMode, tieA, tieB str
 
 func writeRankingLegend(b *strings.Builder, scores []model.Score, system map[string]bool, tieA string) {
 	hasCurrent := false
+	hasPenalty := false
 	for _, sc := range scores {
 		if system[sc.ServerID] {
 			hasCurrent = true
-			break
+		}
+		if penaltyTotal(sc) > 0 {
+			hasPenalty = true
 		}
 	}
 	var parts []string
@@ -96,6 +101,9 @@ func writeRankingLegend(b *strings.Builder, scores []model.Score, system map[str
 	}
 	if tieA != "" {
 		parts = append(parts, Dim("≈ statistically tied"))
+	}
+	if hasPenalty {
+		parts = append(parts, Dim("* cost includes penalties — breakdown in the report"))
 	}
 	if len(parts) > 0 {
 		b.WriteString("  " + strings.Join(parts, "   ") + "\n")
@@ -116,6 +124,10 @@ func rankingRow(res *model.RunResult, sc model.Score, best, worst float64, cats 
 	}
 	bar := scoreColor(sc.TotalMs, best)(Bar(sc.TotalMs, worst, rankBarWidth))
 	scoreCell := Bold(padLeft(FormatMs(sc.TotalMs), 10))
+	penCell := " "
+	if penaltyTotal(sc) > 0 {
+		penCell = Dim("*")
+	}
 	lossCell := Gray(padLeft("-", 6))
 	if st := res.Stats[sc.ServerID]; st != nil {
 		loss := aggregateLossPct(st, cats)
@@ -130,7 +142,17 @@ func rankingRow(res *model.RunResult, sc model.Score, best, worst float64, cats 
 	if sc.ServerID == tieA || sc.ServerID == tieB {
 		marker = Dim("  ≈ tied")
 	}
-	return fmt.Sprintf("%s  %s  %s%s  %s%s", rankCell, nameCell, bar, scoreCell, lossCell, marker)
+	return fmt.Sprintf("%s  %s  %s%s%s %s%s", rankCell, nameCell, bar, scoreCell, penCell, lossCell, marker)
+}
+
+func penaltyTotal(sc model.Score) float64 {
+	total := 0.0
+	for _, v := range sc.Penalties {
+		if v > 0 {
+			total += v
+		}
+	}
+	return total
 }
 
 func renderUnrankedSummary(res *model.RunResult, ranked int) string {

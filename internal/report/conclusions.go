@@ -141,16 +141,16 @@ func comparisonSentence(res *model.RunResult, c model.Comparison) string {
 		var base string
 		if magnitude < 0.001 {
 			base = fmt.Sprintf(
-				"In the aggregate %s score, %s and %s produced the same score (95%% bootstrap interval %.1f to %.1f ms)",
-				c.RankingMode.Label(), a, b, c.CI95LowMs, c.CI95HighMs)
+				"%s and %s had the same aggregate %s latency cost (95%% bootstrap interval %.1f to %.1f ms)",
+				a, b, c.RankingMode.Label(), c.CI95LowMs, c.CI95HighMs)
 		} else {
 			faster, slower := a, b
 			if c.DeltaScoreMs > 0 {
 				faster, slower = b, a
 			}
 			base = fmt.Sprintf(
-				"In the aggregate %s score, %s ranked %.1f ms lower than %s (95%% bootstrap interval %.1f to %.1f ms)",
-				c.RankingMode.Label(), faster, magnitude, slower, c.CI95LowMs, c.CI95HighMs)
+				"%s had a %.1f ms lower aggregate %s latency cost than %s (95%% bootstrap interval %.1f to %.1f ms)",
+				faster, magnitude, c.RankingMode.Label(), slower, c.CI95LowMs, c.CI95HighMs)
 		}
 		switch c.Level {
 		case model.SigSignificant:

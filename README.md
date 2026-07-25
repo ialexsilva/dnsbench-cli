@@ -1,6 +1,6 @@
 # dnsbench
 
-dnsbench is a command-line tool that benchmarks and diagnoses recursive DNS servers **as seen from your own network**. It measures cached, uncached and recursive-path latency, packet loss, retries and stability, and it characterizes each server's behavior: DNSSEC validation, NXDOMAIN handling, DNS rebinding protection and optional modern extensions (DNS64, QNAME minimization, HTTPS records). It ranks every enabled category with equal weight by default, compares aggregate scores with a paired bootstrap and explains the results in plain language.
+dnsbench is a command-line tool that benchmarks and diagnoses recursive DNS servers **as seen from your own network**. It measures cached, uncached and recursive-path latency, packet loss, retries and stability, and it characterizes each server's behavior: DNSSEC validation, NXDOMAIN handling, DNS rebinding protection and optional modern extensions (DNS64, QNAME minimization, HTTPS records). It ranks every enabled category with equal weight by default, compares aggregate latency costs with a paired bootstrap and explains the results in plain language.
 
 Every number produced by dnsbench is specific to one network, one ISP, one location and one time of day. A server that wins here can lose on another network or at another hour, so treat the ranking as a local snapshot, not a universal truth.
 
@@ -103,9 +103,9 @@ The popular domains used by the cached benchmark are stored in [`internal/model/
 
 ## Reports and exports
 
-The terminal prints a compact report: a one-line run summary, a single ranking (bar · score · loss, with your current DNS marked and statistical ties flagged) and a footer. `--details` adds the per-category metrics table.
+The terminal prints a compact report: a one-line run summary, a single ranking (bar · latency cost · loss, with your current DNS marked and statistical ties flagged) and a footer. Lower latency cost is better. `--details` adds the per-category metrics table.
 
-For a full, shareable report use `--export html`, or `--open`, which writes the HTML report and opens it in your browser when the run finishes. The file is self-contained — verdict, full ranking, an embedded chart, score breakdown, server characteristics, detailed metrics and the factual DNS-configuration and comparison sections — so it needs no network and adapts to light or dark themes. Available formats are `json`, `csv`, `txt` and `html`; `--out` sets the directory, `--prefix` the file name, and `--include-raw` keeps per-query samples in the JSON.
+For a full, shareable report use `--export html`, or `--open`, which writes the HTML report and opens it in your browser when the run finishes. The file is self-contained — verdict, full ranking, an embedded chart, latency-cost breakdown, server characteristics, detailed metrics and the factual DNS-configuration and comparison sections — so it needs no network and adapts to light or dark themes. Available formats are `json`, `csv`, `txt` and `html`; `--out` sets the directory, `--prefix` the file name, and `--include-raw` keeps per-query samples in the JSON. The CSV has one row per server and category, and closes each row with the selected ranking's `ranking_mode`, `rank`, `cost_base_ms`, `cost_penalty_ms` and `latency_cost_ms` so the ranking can be reproduced in a spreadsheet; servers that never earned a rank leave those cells empty.
 
 ## Measurement pacing
 

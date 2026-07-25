@@ -100,14 +100,22 @@ func TestRenderRankingList(t *testing.T) {
 	out := RenderRankingList(chartFixture(), model.RankLatency, "", "")
 	for _, want := range []string{
 		"Ranked by overall latency",
+		"latency cost in ms, lower is better",
 		"Cloudflare", "Quad9 Secure", "Google Public DNS",
 		"10.1 ms", "18.0 ms",
 		"● current DNS",
+		"* cost includes penalties",
 		"1 sidelined", "1 unreachable",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ranking list missing %q\n%s", want, out)
 		}
+	}
+	if !strings.Contains(out, "18.0 ms*") {
+		t.Errorf("penalized resolver should carry the penalty marker\n%s", out)
+	}
+	if strings.Contains(out, "10.1 ms*") {
+		t.Errorf("unpenalized resolver must not carry the penalty marker\n%s", out)
 	}
 	if strings.Contains(out, "← current DNS") {
 		t.Errorf("ranking rows should no longer append the trailing current-DNS marker\n%s", out)
