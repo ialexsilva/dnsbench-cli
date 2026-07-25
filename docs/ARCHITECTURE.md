@@ -12,7 +12,7 @@
 | `internal/probe` | Characterization checks: reachability, EDNS0, DNSSEC, NXDOMAIN handling, rebinding protection, reverse PTR, optional extensions |
 | `internal/bench` | Benchmark engine: triage, warmup and measured rounds, seeded scheduling, sessions, pause gate, connectivity watchdog |
 | `internal/stats` | Semantic DNS-validity filtering, per-category `Distribution` computation, phase averages and statistical primitives |
-| `internal/rank` | Ranking-cost computation (weighted base + penalties), rank assignment, presets and paired bootstrap comparisons |
+| `internal/rank` | Latency-cost computation (weighted base + penalties), rank assignment, presets and paired bootstrap comparisons |
 | `internal/report` | Factual DNS/run/comparison sections and exporters for JSON, CSV, TXT and a self-contained HTML report (with an embedded SVG chart) |
 | `internal/ui` | Terminal rendering: tables, result chart, neutral overview card, formatting, colors, live progress view |
 | `internal/power` | Best-effort, per-OS inhibition of system idle sleep during a run (caffeinate on macOS, started in its own session so it neither renames the terminal tab nor absorbs Ctrl+C; a systemd-logind D-Bus lock on Linux; `SetThreadExecutionState` on Windows); no-op elsewhere |
