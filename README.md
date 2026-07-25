@@ -6,7 +6,7 @@ Every number produced by dnsbench is specific to one network, one ISP, one locat
 
 **Who it is for:** anyone choosing a DNS resolver for a home or office network, network administrators comparing resolvers from a specific vantage point, and curious users who want to understand what their current resolver actually does.
 
-![dnsbench live benchmark ranking recursive DNS servers by cached and recursive latency](docs/images/dnsbench-live.png)
+![dnsbench live benchmark ranking recursive DNS servers by cached and recursive latency](docs/images/dnsbench.png)
 
 ## Requirements and build
 
