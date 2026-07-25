@@ -30,7 +30,7 @@ func DefaultScoreCompareConfig() ScoreCompareConfig {
 
 // CompareScores uses a paired bootstrap over benchmark rounds. Resampling a
 // whole round preserves the categories and the two resolvers' shared network
-// conditions, then recomputes the same aggregate score shown in the ranking.
+// conditions, then recomputes the same aggregate latency cost shown to users.
 func CompareScores(
 	idA, idB string,
 	samples []model.Sample,
@@ -51,7 +51,7 @@ func CompareScores(
 	actualA, actualB, ok := scorePair(idA, idB, pairSamples(samples, idA, idB), categories, probes, weights, mode)
 	if !ok {
 		cmp.Level = model.SigInconclusive
-		cmp.Summary = fmt.Sprintf("%s and %s could not be compared because one aggregate score was incomplete.", idA, idB)
+		cmp.Summary = fmt.Sprintf("%s and %s could not be compared because one aggregate latency cost was incomplete.", idA, idB)
 		return cmp
 	}
 	cmp.DeltaScoreMs = actualA - actualB
@@ -61,7 +61,7 @@ func CompareScores(
 	if len(rounds) < cfg.MinRounds {
 		cmp.Level = model.SigInconclusive
 		cmp.Summary = fmt.Sprintf(
-			"Not enough paired rounds to compare the aggregate %s scores of %s and %s (%d available; at least %d are required).",
+			"Not enough paired rounds to compare the aggregate %s latency costs of %s and %s (%d available; at least %d are required).",
 			mode.Label(), idA, idB, len(rounds), cfg.MinRounds)
 		return cmp
 	}
@@ -84,7 +84,7 @@ func CompareScores(
 	cmp.BootstrapSamples = len(deltas)
 	if len(deltas) < cfg.MinRounds {
 		cmp.Level = model.SigInconclusive
-		cmp.Summary = fmt.Sprintf("The paired bootstrap for %s and %s did not produce enough complete aggregate scores.", idA, idB)
+		cmp.Summary = fmt.Sprintf("The paired bootstrap for %s and %s did not produce enough complete aggregate latency costs.", idA, idB)
 		return cmp
 	}
 	sort.Float64s(deltas)
@@ -287,12 +287,12 @@ func scoreCompareSummary(idA, idB string, cmp model.Comparison) string {
 	}
 	switch cmp.Level {
 	case model.SigNegligible:
-		return fmt.Sprintf("%s and %s differed by only %.1f ms in aggregate score; the difference is practically irrelevant.", idA, idB, difference)
+		return fmt.Sprintf("%s and %s differed by only %.1f ms in aggregate latency cost; the difference is practically irrelevant.", idA, idB, difference)
 	case model.SigSignificant:
-		return fmt.Sprintf("%s had a lower aggregate score than %s by %.1f ms; the paired bootstrap difference is statistically significant.", faster, slower, difference)
+		return fmt.Sprintf("%s had a lower aggregate latency cost than %s by %.1f ms; the paired bootstrap difference is statistically significant.", faster, slower, difference)
 	case model.SigLikely:
-		return fmt.Sprintf("%s had a lower aggregate score than %s by %.1f ms; the paired bootstrap suggests a likely difference.", faster, slower, difference)
+		return fmt.Sprintf("%s had a lower aggregate latency cost than %s by %.1f ms; the paired bootstrap suggests a likely difference.", faster, slower, difference)
 	default:
-		return fmt.Sprintf("%s had a lower aggregate score than %s by %.1f ms, but the paired bootstrap was inconclusive.", faster, slower, difference)
+		return fmt.Sprintf("%s had a lower aggregate latency cost than %s by %.1f ms, but the paired bootstrap was inconclusive.", faster, slower, difference)
 	}
 }

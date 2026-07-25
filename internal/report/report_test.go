@@ -209,7 +209,7 @@ func TestBuildConclusionsAggregateBootstrapComparison(t *testing.T) {
 		Level:            model.SigSignificant,
 	}}
 	out := BuildConclusions(res)
-	for _, want := range []string{"aggregate everyday browsing score", "95% bootstrap interval -7.0 to -1.0 ms", "statistically significant"} {
+	for _, want := range []string{"aggregate everyday browsing latency cost", "95% bootstrap interval -7.0 to -1.0 ms", "statistically significant"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("conclusions missing %q:\n%s", want, out)
 		}
@@ -344,12 +344,14 @@ func TestExportHTML(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"<!DOCTYPE html>",
-		"Fastest resolver on this network",
+		"Top-ranked resolver on this network",
 		"SteadyDNS",
 		"current dns",
 		"Your current DNS",
 		"Ranking — everyday browsing",
-		"Score breakdown",
+		"latency cost <b>",
+		"latency cost<br><small>ms, lower is better</small>",
+		"Latency cost breakdown",
 		"Server characteristics",
 		"Detailed metrics — cached category",
 		"Current DNS configuration",
@@ -390,6 +392,12 @@ func TestExportText(t *testing.T) {
 	}
 	if !strings.Contains(out, "GhostDNS") || !strings.Contains(out, "unreachable") {
 		t.Fatalf("text report table missing unreachable server")
+	}
+	if !strings.Contains(out, "Latency cost ms") {
+		t.Fatalf("text report missing latency-cost column:\n%s", out)
+	}
+	if !strings.Contains(out, "weighted latency plus penalties, in ms — lower is better") {
+		t.Fatalf("text report never states that a lower latency cost is better:\n%s", out)
 	}
 }
 
