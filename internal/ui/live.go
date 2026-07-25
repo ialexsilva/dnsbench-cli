@@ -127,12 +127,12 @@ func (ls *liveServer) counts() (total, lost, invalid int) {
 }
 
 type Live struct {
-	servers    []model.Server
-	cfg        model.BenchConfig
-	out        io.Writer
-	isTTY      bool
-	sortKey    string
-	categories []model.Category
+	servers     []model.Server
+	cfg         model.BenchConfig
+	out         io.Writer
+	isTTY       bool
+	sortKey     string
+	categories  []model.Category
 	byID        map[string]*liveServer
 	inflight    map[string]bool
 	start       time.Time
@@ -482,8 +482,8 @@ func (l *Live) metricLine(metric string, scale float64) string {
 		return fmt.Sprintf("  live order: loss · bars: %s latency · shared scale: %s", metric, scaleText)
 	case "name":
 		return fmt.Sprintf("  live order: name · bars: %s latency · shared scale: %s", metric, scaleText)
-	case "score":
-		return fmt.Sprintf("  live order: median latency · final score after benchmark · shared scale: %s", scaleText)
+	case "cost":
+		return fmt.Sprintf("  live order: median latency · final latency cost after benchmark · shared scale: %s", scaleText)
 	default:
 		return fmt.Sprintf("  live order and bars: %s latency · shared scale: %s · lower is better", metric, scaleText)
 	}
@@ -721,8 +721,9 @@ func (l *Live) less(a, b *liveServer) bool {
 }
 
 func normalizeLiveSortKey(k string) string {
-	if strings.EqualFold(strings.TrimSpace(k), "score") {
-		return "score"
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case "cost", "score":
+		return "cost"
 	}
 	return normalizeSortKey(k)
 }

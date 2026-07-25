@@ -100,7 +100,7 @@ time of day.`,
 	cmd.Flags().IntVar(&f.triageAttempts, "triage-attempts", base.TriageAttempts, "probes per server during triage")
 	cmd.Flags().BoolVar(&f.forceAll, "force-all", false, "keep slow servers active instead of benching them")
 	cmd.Flags().StringVar(&f.ranking, "ranking", string(model.RankLatency), "ranking mode: latency, browsing or reliability")
-	cmd.Flags().StringVar(&f.sortKey, "sort", "median", "sort for the detailed table: score, mean, median, p95, loss or name")
+	cmd.Flags().StringVar(&f.sortKey, "sort", "median", "sort for the detailed table: cost, mean, median, p95, loss or name")
 	cmd.Flags().StringVar(&f.category, "category", "", "category shown in the detailed table (default: first enabled)")
 	cmd.Flags().BoolVar(&f.details, "details", false, "show the per-category detailed metrics table")
 	cmd.Flags().BoolVar(&f.quiet, "quiet", false, "suppress the header and the live progress view")
@@ -283,9 +283,9 @@ func validateRunFlags(cmd *cobra.Command, f *runFlags) (model.Mode, model.RankMo
 		return "", "", "", usageErrorf("invalid session %q (accepted: cold, persistent)", f.session)
 	}
 	switch strings.ToLower(strings.TrimSpace(f.sortKey)) {
-	case "score", "mean", "median", "p95", "loss", "name":
+	case "cost", "score", "mean", "median", "p95", "loss", "name":
 	default:
-		return "", "", "", usageErrorf("invalid sort %q (accepted: score, mean, median, p95, loss, name)", f.sortKey)
+		return "", "", "", usageErrorf("invalid sort %q (accepted: cost, mean, median, p95, loss, name)", f.sortKey)
 	}
 	if f.category != "" {
 		if _, err := parseCategories([]string{f.category}); err != nil {

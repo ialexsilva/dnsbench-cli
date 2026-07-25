@@ -345,7 +345,7 @@ func weightsLine(w model.Weights) string {
 			catParts = append(catParts, fmt.Sprintf("%s ×%.2f", c.Label(), v))
 		}
 	}
-	line := "score = " + metric + " latency"
+	line := "latency cost = " + metric + " latency"
 	if len(catParts) > 0 {
 		line += " (" + strings.Join(catParts, ", ") + ")"
 	}
