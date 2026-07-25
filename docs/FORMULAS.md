@@ -69,19 +69,19 @@ where t(0.975, df) is the two-sided 95% Student t critical value (computed numer
 Example: t(0.975, 4) = 2.7764; margin = 2.7764 · 1.581 / √5 = 2.7764 · 0.7071 ≈ 1.963.
 CI95 = 12.0 ± 1.963 = **[10.04, 13.96] ms**. (When n < 2 both bounds equal the mean.)
 
-## Paired bootstrap of aggregate scores
+## Paired bootstrap of aggregate latency costs
 
-The report compares the exact aggregate score used by the selected ranking. Let each complete measured round `r` contain every enabled category for both servers A and B. With `R` common rounds, one bootstrap replicate draws `R` round indices with replacement:
+The report compares the exact aggregate latency cost used by the selected ranking. Let each complete measured round `r` contain every enabled category for both servers A and B. With `R` common rounds, one bootstrap replicate draws `R` round indices with replacement:
 
 ```
 r* = [ randomChoice(1..R), …, randomChoice(1..R) ]   (R draws)
 
-scoreA* = rankingScore(all A samples in r*)
-scoreB* = rankingScore(all B samples in r*)
-Δ*      = scoreA* − scoreB*
+costA* = rankingCost(all A samples in r*)
+costB* = rankingCost(all B samples in r*)
+Δ*     = costA* − costB*
 ```
 
-The resolver pair, all enabled categories, failed attempts and penalties from a chosen round remain together. This preserves the pairing created by shared network conditions. Latency distributions and the complete score are recomputed for every replicate; fixed probe penalties are retained.
+The resolver pair, all enabled categories, failed attempts and penalties from a chosen round remain together. This preserves the pairing created by shared network conditions. Latency distributions and the complete latency cost are recomputed for every replicate; fixed probe penalties are retained.
 
 dnsbench uses **1,000 deterministic replicates**, seeded from the run seed and pair identity. The 95% interval is the R-7 percentile interval `[QΔ*(0.025), QΔ*(0.975)]`. The finite-sample two-sided p-value is:
 
@@ -97,7 +97,7 @@ where `B` is the number of successful bootstrap replicates. At least **5 complet
 ## MDR (minimum difference of relevance) and the four-level classification
 
 ```
-MDR = max( 3 ms , 10% · min(scoreA, scoreB) )
+MDR = max( 3 ms , 10% · min(costA, costB) )
 ```
 
 Classification, in order (real thresholds from the code):
@@ -111,9 +111,11 @@ Classification, in order (real thresholds from the code):
 
 (Fewer than 5 complete paired rounds short-circuits to `inconclusive`.)
 
-## Ranking formula
+## Latency cost formula
 
-Only servers in state `active` with at least one valid resolution in **every category enabled for the run** are ranked. A category with only errors or invalid DNS responses disqualifies that server instead of disappearing from its score. For a mode with weights w:
+The UI calls the aggregate value a **latency cost** because lower is better. Internal Go types and serialized JSON fields retain `Score`/`score` naming for compatibility.
+
+Only servers in state `active` with at least one valid resolution in **every category enabled for the run** are ranked. A category with only errors or invalid DNS responses disqualifies that server instead of disappearing from its latency cost. For a mode with weights w:
 
 **Renormalized weighted base.** Let C be the categories enabled for the whole run, and L(c) the latency metric of category c (`median` or `p95`, per mode):
 

@@ -28,13 +28,13 @@ A packet arriving from a resolver is not automatically a successful DNS lookup. 
 - `tld` requires `NXDOMAIN`, which is the expected result for its random nonexistent names;
 - `SERVFAIL`, `REFUSED`, `FORMERR`, `NOTIMP`, empty `NOERROR` responses and unexpected RCODEs are not latency samples.
 
-Invalid responses remain visible in the reliability counters and penalties. Every category enabled for the run must contain at least one valid resolution for a server to receive a rank; a broken or unsupported category can therefore never disappear silently from that server's score.
+Invalid responses remain visible in the reliability counters and penalties. Every category enabled for the run must contain at least one valid resolution for a server to receive a rank; a broken or unsupported category can therefore never disappear silently from that server's latency cost.
 
 ## Warmup: why and how it is excluded
 
 The first `--warmup` rounds (default 3) run exactly like measured rounds — same shuffling, same query generation — but every sample is flagged `Warmup: true`, and the statistics engine skips warmup samples when computing the ranked latency distributions. Warmup exists because early queries pay one-time costs that do not represent steady state: establishing a persistent connection, the resolver populating its cache, local network warm-up (ARP/NDP resolution and route caches), and OS socket path warm-up.
 
-Connection phase reporting retains non-reused, connection-bearing results as a separate `cold_start_ms` metric, while non-warmup reused results feed `steady_state_ms`. In the default persistent mode the cold set is normally the initial connection; in explicit cold mode it describes the average first-contact cost. The ranked score uses the non-warmup distribution only, so cold-start and steady-state costs are never blended invisibly.
+Connection phase reporting retains non-reused, connection-bearing results as a separate `cold_start_ms` metric, while non-warmup reused results feed `steady_state_ms`. In the default persistent mode the cold set is normally the initial connection; in explicit cold mode it describes the average first-contact cost. The latency cost uses the non-warmup distribution only, so cold-start and steady-state costs are never blended invisibly.
 
 ## Monotonic clock
 
@@ -166,7 +166,7 @@ Per case: NXDOMAIN, REFUSED or an empty NOERROR count as **blocked**; an answer 
 
 ## Modern extensions (optional, outside the ranking)
 
-With `--extended` (on `probe` or `run`), three informational checks run. Their results are reported but **never affect scores or ranking**:
+With `--extended` (on `probe` or `run`), three informational checks run. Their results are reported but **never affect latency cost or order**:
 
 - **DNS64** — AAAA query for `ipv4only.arpa`; a synthesized AAAA answer means DNS64 is active.
 - **QNAME minimization** — TXT query for `qnamemintest.internet.nl`; the answer text ("HOORAY" vs "NO") reports whether the resolver minimizes query names toward authoritative servers.
@@ -174,16 +174,16 @@ With `--extended` (on `probe` or `run`), three informational checks run. Their r
 
 ## Aggregate ranking and statistical significance
 
-The default `latency` ranking gives every enabled query category equal weight. If the uncached category is disabled for the entire run, only cached and TLD remain and each receives half of the base score. The alternative `browsing` and `reliability` presets remain available through `--ranking`.
+The default `latency` ranking gives every enabled query category equal weight. If the uncached category is disabled for the entire run, only cached and TLD remain and each receives half of the base cost. The alternative `browsing` and `reliability` presets remain available through `--ranking`.
 
-Pairwise conclusions compare the same aggregate score shown in the selected ranking, not one arbitrarily chosen category. dnsbench performs 1,000 paired bootstrap resamples of complete rounds. Keeping both resolvers and every category from a selected round together preserves shared congestion and timing conditions; each bootstrap draw recomputes latency, jitter, loss, validity, retry and characterization penalties from scratch.
+Pairwise conclusions compare the same aggregate latency cost shown in the selected ranking, not one arbitrarily chosen category. dnsbench performs 1,000 paired bootstrap resamples of complete rounds. Keeping both resolvers and every category from a selected round together preserves shared congestion and timing conditions; each bootstrap draw recomputes latency, jitter, loss, validity, retry and characterization penalties from scratch.
 
-The resulting score-difference distribution produces a two-sided p-value and a 95% percentile interval. Classifications are:
+The resulting cost-difference distribution produces a two-sided p-value and a 95% percentile interval. Classifications are:
 
 - **statistically significant** — the 95% interval excludes zero and the difference exceeds the relevance floor;
 - **likely** — the difference exceeds the relevance floor and the bootstrap p-value is below 0.20, but the 95% interval still crosses zero;
 - **inconclusive** — the data cannot reliably order the pair, or fewer than 5 complete paired rounds are available;
-- **practically irrelevant** — the absolute score difference is below `max(3 ms, 10% of the smaller score)`, regardless of statistical significance.
+- **practically irrelevant** — the absolute cost difference is below `max(3 ms, 10% of the smaller cost)`, regardless of statistical significance.
 
 The report declares the selected ranking's top two effectively tied when their aggregate comparison is inconclusive or negligible.
 
