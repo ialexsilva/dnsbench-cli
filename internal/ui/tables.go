@@ -9,8 +9,6 @@ import (
 	"dnsbench/internal/model"
 )
 
-var penaltyOrder = []string{"loss", "servfail", "invalid-response", "retry", "jitter", "nxdomain-interception", "no-dnssec", "no-rebind-protection"}
-
 func renderTable(headers []string, rightAlign []bool, rows [][]string) string {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
@@ -280,102 +278,4 @@ func metricValue(d *model.Distribution, key string) float64 {
 		return d.LossPct
 	}
 	return d.MedianMs
-}
-
-func RenderScoreTable(res *model.RunResult, mode model.RankMode) string {
-	scores := sortedScores(res, mode)
-	penKeys := presentPenaltyKeys(scores)
-	headers := []string{"rank", "server", "base"}
-	for _, k := range penKeys {
-		headers = append(headers, "+"+k)
-	}
-	headers = append(headers, "total")
-	rightAlign := make([]bool, len(headers))
-	for i := range rightAlign {
-		rightAlign[i] = i != 1
-	}
-	rows := make([][]string, 0, len(scores))
-	for _, sc := range scores {
-		cells := []string{strconv.Itoa(sc.Rank), serverName(res, sc.ServerID), FormatMs(sc.BaseMs)}
-		for _, k := range penKeys {
-			if v := sc.Penalties[k]; v > 0 {
-				cells = append(cells, FormatMs(v))
-			} else {
-				cells = append(cells, "")
-			}
-		}
-		cells = append(cells, Bold(FormatMs(sc.TotalMs)))
-		rows = append(rows, cells)
-	}
-	return renderTable(headers, rightAlign, rows) + weightsLine(res.Weights[mode]) + "\n"
-}
-
-func presentPenaltyKeys(scores []model.Score) []string {
-	present := map[string]bool{}
-	for _, sc := range scores {
-		for k, v := range sc.Penalties {
-			if v > 0 {
-				present[k] = true
-			}
-		}
-	}
-	var keys []string
-	for _, k := range penaltyOrder {
-		if present[k] {
-			keys = append(keys, k)
-			delete(present, k)
-		}
-	}
-	var extra []string
-	for k := range present {
-		extra = append(extra, k)
-	}
-	sort.Strings(extra)
-	return append(keys, extra...)
-}
-
-func weightsLine(w model.Weights) string {
-	metric := w.LatencyMetric
-	if metric == "" {
-		metric = "median"
-	}
-	var catParts []string
-	for _, c := range model.AllCategories() {
-		if v := w.Category[c]; v > 0 {
-			catParts = append(catParts, fmt.Sprintf("%s ×%.2f", c.Label(), v))
-		}
-	}
-	line := "latency cost = " + metric + " latency"
-	if len(catParts) > 0 {
-		line += " (" + strings.Join(catParts, ", ") + ")"
-	}
-	var penParts []string
-	if w.PenaltyPerLossPctMs > 0 {
-		penParts = append(penParts, fmt.Sprintf("loss ×%.1f ms per %%", w.PenaltyPerLossPctMs))
-	}
-	if w.PenaltyPerServfailPctMs > 0 {
-		penParts = append(penParts, fmt.Sprintf("servfail ×%.1f ms per %%", w.PenaltyPerServfailPctMs))
-	}
-	if w.PenaltyPerInvalidPctMs > 0 {
-		penParts = append(penParts, fmt.Sprintf("invalid response ×%.1f ms per %%", w.PenaltyPerInvalidPctMs))
-	}
-	if w.PenaltyPerRetryPctMs > 0 {
-		penParts = append(penParts, fmt.Sprintf("retry ×%.1f ms per %%", w.PenaltyPerRetryPctMs))
-	}
-	if w.JitterWeight > 0 {
-		penParts = append(penParts, fmt.Sprintf("jitter ×%.2f", w.JitterWeight))
-	}
-	if w.PenaltyNXInterceptionMs > 0 {
-		penParts = append(penParts, "NXDOMAIN interception +"+FormatMs(w.PenaltyNXInterceptionMs))
-	}
-	if w.PenaltyNoDNSSECMs > 0 {
-		penParts = append(penParts, "no DNSSEC +"+FormatMs(w.PenaltyNoDNSSECMs))
-	}
-	if w.PenaltyNoRebindMs > 0 {
-		penParts = append(penParts, "no rebind protection +"+FormatMs(w.PenaltyNoRebindMs))
-	}
-	if len(penParts) > 0 {
-		line += " + penalties (" + strings.Join(penParts, ", ") + ")"
-	}
-	return line
 }
