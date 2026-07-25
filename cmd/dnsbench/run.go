@@ -91,7 +91,7 @@ time of day.`,
 	cmd.Flags().IntVar(&f.retries, "retries", base.Retries, "retries per failed query")
 	cmd.Flags().DurationVar(&f.retryInterval, "retry-interval", base.RetryInterval, "wait between retries")
 	cmd.Flags().IntVar(&f.concurrency, "concurrency", base.Concurrency, "maximum queries in flight at once")
-	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "minimum spacing between any two query launches, across all servers (0 disables pacing)")
+	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "starting spacing between any two query launches, across all servers; adapts between a quarter of it and 8x it (0 disables pacing)")
 	cmd.Flags().DurationVar(&f.gap, "gap", base.PerServerGap, "gap between consecutive queries to the same server")
 	cmd.Flags().StringVar(&f.session, "session", string(base.Session), "connection reuse: cold or persistent")
 	cmd.Flags().Int64Var(&f.seed, "seed", 0, "random seed (0 picks a random seed)")

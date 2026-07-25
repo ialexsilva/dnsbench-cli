@@ -12,10 +12,10 @@
 | `internal/probe` | Characterization checks: reachability, EDNS0, DNSSEC, NXDOMAIN handling, rebinding protection, reverse PTR, optional extensions |
 | `internal/bench` | Benchmark engine: triage, warmup and measured rounds, seeded scheduling, sessions, pause gate, connectivity watchdog |
 | `internal/stats` | Semantic DNS-validity filtering, per-category `Distribution` computation, phase averages and statistical primitives |
-| `internal/rank` | Ranking-cost computation (weighted base + penalties), rank assignment, presets and paired bootstrap comparisons |
+| `internal/rank` | Latency-cost computation (weighted base + penalties), rank assignment, presets and paired bootstrap comparisons |
 | `internal/report` | Factual DNS/run/comparison sections and exporters for JSON, CSV, TXT and a self-contained HTML report (with an embedded SVG chart) |
 | `internal/ui` | Terminal rendering: tables, result chart, neutral overview card, formatting, colors, live progress view |
-| `internal/power` | Best-effort, per-OS inhibition of system idle sleep during a run (caffeinate on macOS, a systemd-logind D-Bus lock on Linux, `SetThreadExecutionState` on Windows); no-op elsewhere |
+| `internal/power` | Best-effort, per-OS inhibition of system idle sleep during a run (caffeinate on macOS, started in its own session so it neither renames the terminal tab nor absorbs Ctrl+C; a systemd-logind D-Bus lock on Linux; `SetThreadExecutionState` on Windows); no-op elsewhere |
 
 ## Dependency arrows
 
@@ -60,8 +60,8 @@ Supporting types: `TriageResult` (attempts, valid responses, best RTT, resulting
 7. **Statistics** — samples are grouped by server and category; `stats.Compute` admits only category-correct DNS results into latency distributions and calculates transport, validity and retry rates. `stats.ComputePhases` keeps cold-start and steady-state measurements separate.
 8. **Ranking** — `rank.ScoreServers` runs for all three modes using the presets, optionally overridden by `--weights` JSON. Every enabled category must have valid data. `--ranking` selects the printed mode; equal-weight `latency` is the default.
 9. **Comparisons** — the selected ranking's top three are compared pairwise, and its winner is compared with each ranked system server, using a 1,000-draw paired bootstrap that recomputes the full aggregate latency cost.
-10. **Report** — ranked measurement chart, neutral benchmark overview, latency-cost table, compact server-characteristics table, optional `--details` metrics table, and factual sections for the detected DNS configuration, run coverage and statistical comparisons. It does not print highlights, issues, caveats or a final recommendation.
-11. **Export** — `--export json,csv,txt,html` writes timestamped files to `--out` with `--prefix`; `--include-raw` keeps raw samples in the JSON. `--open` writes the HTML report (implying `--export html`) and opens it in the browser. The terminal prints a compact one-line run summary, a single merged ranking (bar · latency cost · loss, with the current DNS marked and statistical ties flagged) and a footer pointing to the HTML report; the full latency-cost breakdown, server-characteristics table and prose sections live in the HTML report, and `--details` adds the per-category metrics table to the terminal.
+10. **Report** — ranked measurement chart, neutral benchmark overview, latency-cost breakdown, compact server-characteristics table, optional `--details` metrics table, and factual sections for the detected DNS configuration, run coverage and statistical comparisons. The breakdown is an HTML-only section; the terminal has no equivalent table. It does not print highlights, issues, caveats or a final recommendation.
+11. **Export** — `--export json,csv,txt,html` writes timestamped files to `--out` with `--prefix`; `--include-raw` keeps raw samples in the JSON. `--open` writes the HTML report (implying `--export html`) and opens it in the browser. The terminal prints a compact one-line run summary, a single merged ranking (bar · latency cost · loss, with the current DNS marked, statistical ties flagged and a `*` on any cost that includes penalties) and a footer pointing to the HTML report; the full latency-cost breakdown, server-characteristics table and prose sections live in the HTML report, and `--details` adds the per-category metrics table to the terminal.
 
 Interruption: the first Ctrl+C cancels the context, the engine stops cleanly and the report is produced from partial results; a second Ctrl+C aborts.
 
