@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -290,18 +291,23 @@ func TestExportCSV(t *testing.T) {
 	if len(records) != 7 {
 		t.Fatalf("expected header plus 6 rows, got %d records", len(records))
 	}
-	if len(records[0]) != 36 {
-		t.Fatalf("expected 36 columns, got %d", len(records[0]))
+	if len(records[0]) != 41 {
+		t.Fatalf("expected 41 columns, got %d", len(records[0]))
 	}
 	if records[0][0] != "server_id" || records[0][35] != "truncated_pct" {
-		t.Fatalf("unexpected header: %v", records[0])
+		t.Fatalf("pre-existing columns must keep their position: %v", records[0])
+	}
+	if got := records[0][36:]; !reflect.DeepEqual(got, []string{"ranking_mode", "rank", "cost_base_ms", "cost_penalty_ms", "latency_cost_ms"}) {
+		t.Fatalf("unexpected ranking columns: %v", got)
 	}
 	seen := map[string]bool{}
+	ranking := map[string][]string{}
 	for _, row := range records[1:] {
-		if len(row) != 36 {
-			t.Fatalf("row has %d columns, expected 36: %v", len(row), row)
+		if len(row) != 41 {
+			t.Fatalf("row has %d columns, expected 41: %v", len(row), row)
 		}
 		seen[row[0]+"|"+row[7]] = true
+		ranking[row[0]] = row[36:]
 		if !strings.Contains(row[23], ".") {
 			t.Fatalf("median_ms should use dot decimal: %q", row[23])
 		}
@@ -311,6 +317,45 @@ func TestExportCSV(t *testing.T) {
 			t.Fatalf("missing row for %s; got %v", key, seen)
 		}
 	}
+	// testResult selects the browsing ranking, where speedy carries a 20 ms
+	// loss penalty and system-1 a 5 ms no-DNSSEC one.
+	for id, want := range map[string][]string{
+		"steady":   {"browsing", "1", "8.200", "0.000", "8.200"},
+		"speedy":   {"browsing", "2", "7.000", "20.000", "27.000"},
+		"system-1": {"browsing", "3", "13.000", "5.000", "18.000"},
+	} {
+		if got := ranking[id]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("ranking cells for %s: got %v, want %v", id, got, want)
+		}
+	}
+}
+
+func TestExportCSVLeavesUnrankedServersEmpty(t *testing.T) {
+	res := testResult()
+	// GhostDNS is unreachable: it has measurements but never earned a rank.
+	res.Stats["ghost"] = &model.ServerStats{
+		ServerID:    "ghost",
+		State:       model.StateOffline,
+		PerCategory: map[model.Category]*model.Distribution{model.CatCached: dist(0, 0, 100, 0, nil)},
+	}
+	var buf bytes.Buffer
+	if err := ExportCSV(&buf, res); err != nil {
+		t.Fatalf("ExportCSV: %v", err)
+	}
+	records, err := csv.NewReader(&buf).ReadAll()
+	if err != nil {
+		t.Fatalf("csv parse: %v", err)
+	}
+	for _, row := range records[1:] {
+		if row[0] != "ghost" {
+			continue
+		}
+		if got := row[36:]; !reflect.DeepEqual(got, []string{"browsing", "", "", "", ""}) {
+			t.Fatalf("unranked server must have empty ranking cells, got %v", got)
+		}
+		return
+	}
+	t.Fatal("no row emitted for the unranked server")
 }
 
 func TestChartSVGIsValidXML(t *testing.T) {

@@ -15,12 +15,20 @@ var csvColumns = []string{
 	"min_ms", "max_ms", "mean_ms", "median_ms", "stddev_ms", "variance_ms2",
 	"p50_ms", "p90_ms", "p95_ms", "p99_ms", "ci95_low_ms", "ci95_high_ms",
 	"jitter_ms", "servfail_pct", "invalid_pct", "truncated_pct",
+	"ranking_mode", "rank", "cost_base_ms", "cost_penalty_ms", "latency_cost_ms",
 }
 
 func ExportCSV(w io.Writer, res *model.RunResult) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write(csvColumns); err != nil {
 		return err
+	}
+	mode := selectedMode(res)
+	modeCell := ""
+	scores := make(map[string]model.Score, len(res.Scores[mode]))
+	for _, sc := range res.Scores[mode] {
+		scores[sc.ServerID] = sc
+		modeCell = string(mode)
 	}
 	for i := range res.Servers {
 		s := &res.Servers[i]
@@ -46,6 +54,7 @@ func ExportCSV(w io.Writer, res *model.RunResult) error {
 				csvFloat(d.CI95LowMs), csvFloat(d.CI95HighMs),
 				csvFloat(d.JitterMs), csvFloat(d.ServfailPct), csvFloat(d.InvalidPct), csvFloat(d.TruncatedPct),
 			}
+			row = append(row, csvRanking(scores, modeCell, s.ID)...)
 			if err := cw.Write(row); err != nil {
 				return err
 			}
@@ -53,6 +62,24 @@ func ExportCSV(w io.Writer, res *model.RunResult) error {
 	}
 	cw.Flush()
 	return cw.Error()
+}
+
+// csvRanking returns the ranking cells for a server. Servers that never earned
+// a rank — unreachable, sidelined, or missing a category — get empty cells
+// rather than a zero that a spreadsheet would happily average.
+func csvRanking(scores map[string]model.Score, mode, serverID string) []string {
+	sc, ok := scores[serverID]
+	if !ok {
+		return []string{mode, "", "", "", ""}
+	}
+	penalty := 0.0
+	for _, v := range sc.Penalties {
+		penalty += v
+	}
+	return []string{
+		mode, strconv.Itoa(sc.Rank),
+		csvFloat(sc.BaseMs), csvFloat(penalty), csvFloat(sc.TotalMs),
+	}
 }
 
 func csvFloat(v float64) string {
