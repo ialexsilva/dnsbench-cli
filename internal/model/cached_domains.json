@@ -1,5 +1,5 @@
 {
-  "source": "Semrush most visited websites in the world, ranks 1-100 (72 entries survived the exclusions), topped up with 17 previously vetted entries from the earlier Brazil-localized set",
+  "source": "Semrush most visited websites in the world, ranks 1-100 (72 entries survived the exclusions), topped up with 16 previously vetted entries from the earlier Brazil-localized set",
   "snapshot": "2026-05",
   "notes": "Global ranking on generic TLDs only. Excluded: adult and gambling sites; every country-edition domain (.br, .de, .it, .co.uk, .pt, .co.jp, .in, .vn, .ru, .su), since a national storefront or edition measures one country rather than the global web -- a brand on a generic TLD such as globo.com or marca.com is kept; region-specific Asian services (naver, rakuten, note); volatile piracy aggregators; and domains owned by any resolver dnsbench benchmarks (Google, Cloudflare, Cisco/OpenDNS, DigiCert, Comodo, Gcore, NextDNS, AdGuard, Quad9, Control D) to avoid a home-domain advantage. Generic-in-practice TLDs such as .ai, .io, .me, .tv and .us are kept because those domains are the service's global home, not a national edition.",
   "domains": [
@@ -82,7 +82,6 @@
     "hotmart.com",
     "wa.me",
     "r7.com",
-    "brasil247.com",
     "gupy.io",
     "poki.com",
     "anota.ai",
