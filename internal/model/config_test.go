@@ -54,12 +54,14 @@ func TestDefaultCachedDomainsAreCuratedTopDomains(t *testing.T) {
 			t.Errorf("excluded domain %q must not be in the latency set", excluded)
 		}
 	}
-	// The set is a global ranking, so country TLDs whose services only serve that
-	// country are out. European regional storefronts (.de, .it, .co.uk) stay.
+	// The set is a global ranking, so every country-edition domain is out,
+	// including European storefronts. Generic-in-practice TLDs (.ai, .io, .me,
+	// .tv, .us) stay, because those are the service's global home rather than a
+	// national edition.
 	for domain := range seen {
-		for _, suffix := range []string{".ru", ".jp", ".su", ".vn", ".in", ".br"} {
+		for _, suffix := range []string{".br", ".de", ".it", ".uk", ".pt", ".es", ".fr", ".ru", ".jp", ".su", ".vn", ".in"} {
 			if strings.HasSuffix(domain, suffix) {
-				t.Errorf("region-specific domain %q must not be in the global latency set", domain)
+				t.Errorf("country-edition domain %q must not be in the global latency set", domain)
 			}
 		}
 	}
