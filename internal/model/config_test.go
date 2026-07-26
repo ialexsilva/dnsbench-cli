@@ -31,26 +31,36 @@ func TestDefaultCachedDomainsAreCuratedTopDomains(t *testing.T) {
 
 	for _, want := range []string{
 		"facebook.com", "chatgpt.com", "wikipedia.org", "amazon.com",
-		"netflix.com", "github.com", "bbc.com", "mercadolivre.com.br",
-		"gov.br", "uol.com.br", "correios.com.br", "reclameaqui.com.br",
+		"netflix.com", "github.com", "bbc.com", "linkedin.com",
+		// A Brazilian brand on a generic TLD stays; only the .br TLD is excluded.
+		"globo.com",
 	} {
 		if !seen[want] {
 			t.Errorf("popular cached domain %q is missing", want)
 		}
 	}
 	for _, excluded := range []string{
-		"bet.br", "pornhub.com", "xvideos.com", "onlyfans.com",
+		// adult and gambling
+		"bet.br", "pornhub.com", "xvideos.com", "onlyfans.com", "theporndude.com",
+		// owned by a resolver dnsbench benchmarks
 		"cloudflare.com", "google.com", "youtube.com", "gemini.google.com",
-		"google.com.br", "labs.google", "yandex.ru", "yahoo.co.jp",
-		"baidu.com", "naver.com", "bilibili.com",
+		"labs.google", "cisco.com", "opendns.com", "digicert.com", "comodo.com",
+		"gcore.com", "nextdns.io", "adguard.com", "quad9.net", "controld.com",
+		// russian and region-specific asian services
+		"yandex.ru", "yandex.com", "yahoo.co.jp", "baidu.com", "naver.com",
+		"bilibili.com", "rakuten.co.jp", "vk.com", "mail.ru",
 	} {
 		if seen[excluded] {
 			t.Errorf("excluded domain %q must not be in the latency set", excluded)
 		}
 	}
+	// The set is a global ranking, so country TLDs whose services only serve that
+	// country are out. European regional storefronts (.de, .it, .co.uk) stay.
 	for domain := range seen {
-		if strings.HasSuffix(domain, ".ru") || strings.HasSuffix(domain, ".jp") {
-			t.Errorf("region-specific domain %q must not be in the Brazilian latency set", domain)
+		for _, suffix := range []string{".ru", ".jp", ".su", ".vn", ".in", ".br"} {
+			if strings.HasSuffix(domain, suffix) {
+				t.Errorf("region-specific domain %q must not be in the global latency set", domain)
+			}
 		}
 	}
 }
