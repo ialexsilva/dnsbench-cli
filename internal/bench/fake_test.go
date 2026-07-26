@@ -121,6 +121,14 @@ func testServers(ids ...string) []model.Server {
 	return servers
 }
 
+func builtinTestServers(ids ...string) []model.Server {
+	servers := testServers(ids...)
+	for i := range servers {
+		servers[i].Source = model.SourceBuiltin
+	}
+	return servers
+}
+
 func testConfig() model.BenchConfig {
 	return model.BenchConfig{
 		Rounds:        3,

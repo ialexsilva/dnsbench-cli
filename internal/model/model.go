@@ -661,7 +661,7 @@ func DefaultBenchConfig(m Mode) BenchConfig {
 		Session:           SessionPersistent,
 		TriageEnabled:     true,
 		TriageAttempts:    10,
-		TriageThreshold:   50 * time.Millisecond,
+		TriageThreshold:   200 * time.Millisecond,
 		ConnectivityWatch: true,
 	}
 }

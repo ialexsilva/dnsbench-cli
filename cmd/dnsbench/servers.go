@@ -19,7 +19,7 @@ import (
 func newServersCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "servers",
-		Short: "Manage the DNS server lists (system, built-in and user)",
+		Short: "Manage the DNS resolver lists (system, built-in and user)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -65,7 +65,7 @@ func mergedServerList(ctx context.Context, warn func(string)) ([]model.Server, e
 	}
 	user, err := serverlist.LoadUser("")
 	if err != nil {
-		return nil, fmt.Errorf("could not load the user server list: %w", err)
+		return nil, fmt.Errorf("could not load the user resolver list: %w", err)
 	}
 	return serverlist.Merge(system, user, serverlist.Builtin()), nil
 }
@@ -74,7 +74,7 @@ func newServersListCmd() *cobra.Command {
 	var protocols, operators, sources []string
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all known DNS servers (system + user + built-in)",
+		Short: "List all known DNS resolvers (system + user + built-in)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -99,17 +99,17 @@ func newServersListCmd() *cobra.Command {
 			})
 			out := cmd.OutOrStdout()
 			if len(servers) == 0 {
-				fmt.Fprintln(out, "No servers matched the given filters.")
+				fmt.Fprintln(out, "No resolvers matched the given filters.")
 				return nil
 			}
 			fmt.Fprint(out, ui.RenderServersTable(servers, nil, nil))
-			fmt.Fprintf(out, "\n%d servers listed.\n", len(servers))
+			fmt.Fprintf(out, "\n%s listed.\n", countNoun(len(servers), "resolver"))
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&protocols, "protocol", nil, "only show servers using these protocols (udp, tcp, dot, doh, doh3, doq)")
-	cmd.Flags().StringSliceVar(&operators, "operator", nil, "only show servers run by these operators")
-	cmd.Flags().StringSliceVar(&sources, "source", nil, "only show servers from these sources (system, builtin, user)")
+	cmd.Flags().StringSliceVar(&protocols, "protocol", nil, "only show resolvers using these protocols (udp, tcp, dot, doh, doh3, doq)")
+	cmd.Flags().StringSliceVar(&operators, "operator", nil, "only show resolvers run by these operators")
+	cmd.Flags().StringSliceVar(&sources, "source", nil, "only show resolvers from these sources (system, builtin, user)")
 	return cmd
 }
 
@@ -118,7 +118,7 @@ func newServersAddCmd() *cobra.Command {
 	var port int
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Add a DNS server to the user list",
+		Short: "Add a DNS resolver to the user list",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			server := model.Server{
@@ -137,16 +137,16 @@ func newServersAddCmd() *cobra.Command {
 			}
 			existing, err := serverlist.LoadUser("")
 			if err != nil {
-				return fmt.Errorf("could not load the user server list: %w", err)
+				return fmt.Errorf("could not load the user resolver list: %w", err)
 			}
 			for _, s := range existing {
 				if s.Key() == server.Key() {
-					return fmt.Errorf("a server with the same endpoint already exists in the user list: %s", s.DisplayName())
+					return fmt.Errorf("a resolver with the same endpoint already exists in the user list: %s", s.DisplayName())
 				}
 			}
 			existing = append(existing, server)
 			if err := serverlist.SaveUser("", existing); err != nil {
-				return fmt.Errorf("could not save the user server list: %w", err)
+				return fmt.Errorf("could not save the user resolver list: %w", err)
 			}
 			dir, err := serverlist.UserDir("")
 			if err != nil {
@@ -160,12 +160,12 @@ func newServersAddCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "display name for the server")
-	cmd.Flags().StringVar(&operator, "operator", "", "organization operating the server")
+	cmd.Flags().StringVar(&name, "name", "", "display name for the resolver")
+	cmd.Flags().StringVar(&operator, "operator", "", "organization operating the resolver")
 	cmd.Flags().StringVar(&protocol, "protocol", "udp", "protocol: udp, tcp, dot, doh, doh3 or doq")
 	cmd.Flags().StringVar(&address, "address", "", "IP address (required for udp, tcp, dot and doq; pins the bootstrap IP for doh and doh3)")
 	cmd.Flags().IntVar(&port, "port", 0, "port (0 uses the protocol default)")
-	cmd.Flags().StringVar(&tlsHostname, "tls-hostname", "", "TLS server name for DoT and DoQ")
+	cmd.Flags().StringVar(&tlsHostname, "tls-hostname", "", "TLS hostname for DoT and DoQ")
 	cmd.Flags().StringVar(&dohURL, "doh-url", "", "https URL for DoH and DoH/3")
 	cmd.Flags().StringVar(&notes, "notes", "", "free-form notes")
 	return cmd
@@ -217,7 +217,7 @@ func newServersImportCmd() *cobra.Command {
 	var file, format string
 	cmd := &cobra.Command{
 		Use:   "import",
-		Short: "Import DNS servers from a file into the user list",
+		Short: "Import DNS resolvers from a file into the user list",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := resolveFormat(file, format)
@@ -234,7 +234,7 @@ func newServersImportCmd() *cobra.Command {
 			}
 			existing, err := serverlist.LoadUser("")
 			if err != nil {
-				return fmt.Errorf("could not load the user server list: %w", err)
+				return fmt.Errorf("could not load the user resolver list: %w", err)
 			}
 			seen := make(map[string]bool, len(existing))
 			for _, s := range existing {
@@ -245,7 +245,7 @@ func newServersImportCmd() *cobra.Command {
 				s := imported[i]
 				s.Source = model.SourceUser
 				if err := serverlist.ValidateAndPrepare(&s); err != nil {
-					return fmt.Errorf("invalid server %q in %s: %w", s.DisplayName(), file, err)
+					return fmt.Errorf("invalid resolver %q in %s: %w", s.DisplayName(), file, err)
 				}
 				if seen[s.Key()] {
 					skipped++
@@ -257,10 +257,10 @@ func newServersImportCmd() *cobra.Command {
 			}
 			if added > 0 {
 				if err := serverlist.SaveUser("", existing); err != nil {
-					return fmt.Errorf("could not save the user server list: %w", err)
+					return fmt.Errorf("could not save the user resolver list: %w", err)
 				}
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Imported %d servers into the user list (%d duplicates skipped).\n", added, skipped)
+			fmt.Fprintf(cmd.OutOrStdout(), "Imported %s into the user list (%d duplicates skipped).\n", countNoun(added, "resolver"), skipped)
 			return nil
 		},
 	}
@@ -274,7 +274,7 @@ func newServersExportCmd() *cobra.Command {
 	var file, format, source string
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export the known DNS servers to a file",
+		Short: "Export the known DNS resolvers to a file",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -299,16 +299,16 @@ func newServersExportCmd() *cobra.Command {
 				servers = serverlist.Filter(servers, serverlist.FilterOptions{Sources: srcs})
 			}
 			if len(servers) == 0 {
-				return fmt.Errorf("no servers to export")
+				return fmt.Errorf("no resolvers to export")
 			}
 			data, err := encodeServers(servers, f)
 			if err != nil {
-				return fmt.Errorf("could not encode the server list: %w", err)
+				return fmt.Errorf("could not encode the resolver list: %w", err)
 			}
 			if err := os.WriteFile(file, data, 0o644); err != nil {
 				return fmt.Errorf("could not write %s: %w", file, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Exported %d servers to %s.\n", len(servers), file)
+			fmt.Fprintf(cmd.OutOrStdout(), "Exported %s to %s.\n", countNoun(len(servers), "resolver"), file)
 			return nil
 		},
 	}

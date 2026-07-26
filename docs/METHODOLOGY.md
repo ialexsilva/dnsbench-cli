@@ -62,11 +62,11 @@ All randomness (orders, labels) derives from a single seed. `--seed 0` (the defa
 
 Before the benchmark, triage cheaply removes servers that would waste the run's time budget (enabled by default; skip with `--no-triage`):
 
-- Each server gets up to `--triage-attempts` probes (default 10) for the first cached domain, stopping early as soon as one valid A/CNAME answer arrives at or below `--triage-threshold` (default 50ms). Triage probes go through the same global pacer and in-flight cap as benchmark queries, so triage cannot flood the local network and sideline servers for self-induced loss.
-- **States**: `active` (valid answer within threshold) proceeds to the benchmark; `offline` (zero valid answers — the reason records the dominant error kind, e.g. "8 of 10 probes timed out"); `benched`, shown as **"out of contention"** (valid answers arrived but the best RTT exceeded the threshold — the server works, it is just too slow to compete at this vantage point).
-- `--force-all` keeps slow servers `active` instead of benching them.
+- Each server gets up to `--triage-attempts` probes (default 10) for the first cached domain. Built-in resolvers stop early as soon as one valid A/CNAME answer arrives at or below `--triage-threshold` (default 200ms). Custom, user-list and system resolvers stop on the first valid answer regardless of RTT. Triage probes go through the same global pacer and in-flight cap as benchmark queries, so triage cannot flood the local network and sideline servers for self-induced loss.
+- **States**: `active` proceeds to the benchmark; `offline` means zero valid answers (the reason records the dominant error kind, e.g. "8 of 10 probes timed out"); `benched`, shown as **"out of contention"**, applies only to built-in resolvers whose valid answers all exceeded the threshold.
+- `--force-all` keeps slow built-in resolvers `active` instead of benching them.
 
-**Out-of-contention is reversible.** Triage decisions apply to a single run and are never persisted. To include a benched server, re-run with a higher `--triage-threshold`, with `--force-all`, or with `--no-triage`.
+**Out-of-contention is reversible.** Triage decisions apply to a single run and are never persisted. To include a benched built-in server, re-run with a higher `--triage-threshold`, with `--force-all`, or with `--no-triage`.
 
 ## Retries and timeouts
 

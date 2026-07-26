@@ -92,7 +92,7 @@ func (e *Engine) triageServer(ctx context.Context, s model.Server) *model.Triage
 			if tr.BestRTT == 0 || res.RTT < tr.BestRTT {
 				tr.BestRTT = res.RTT
 			}
-			if res.RTT <= e.cfg.TriageThreshold {
+			if s.Source != model.SourceBuiltin || res.RTT <= e.cfg.TriageThreshold {
 				break
 			}
 		} else if res.Err != nil {
@@ -107,11 +107,11 @@ func (e *Engine) triageServer(ctx context.Context, s model.Server) *model.Triage
 			}
 		}
 	}
-	e.classifyTriage(tr, counts, msgs)
+	e.classifyTriage(s, tr, counts, msgs)
 	return tr
 }
 
-func (e *Engine) classifyTriage(tr *model.TriageResult, counts map[model.ErrKind]int, msgs map[model.ErrKind]string) {
+func (e *Engine) classifyTriage(s model.Server, tr *model.TriageResult, counts map[model.ErrKind]int, msgs map[model.ErrKind]string) {
 	if tr.Attempts == 0 {
 		tr.State = model.StateOffline
 		tr.Reason = "triage was interrupted before any probe completed"
@@ -122,7 +122,7 @@ func (e *Engine) classifyTriage(tr *model.TriageResult, counts map[model.ErrKind
 		tr.Reason = offlineReason(tr.Attempts, counts, msgs)
 		return
 	}
-	if tr.BestRTT > e.cfg.TriageThreshold {
+	if s.Source == model.SourceBuiltin && tr.BestRTT > e.cfg.TriageThreshold {
 		if e.cfg.ForceAll {
 			tr.State = model.StateActive
 			tr.Reason = fmt.Sprintf("best RTT %s is above the triage threshold %s; kept active by force-all",

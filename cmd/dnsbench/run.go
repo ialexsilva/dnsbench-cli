@@ -67,8 +67,8 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the full DNS benchmark and print a ranked report",
-		Long: `Runs the full flow: discovers the system DNS servers, characterizes every
-selected server, benchmarks them across query categories, ranks the results
+		Long: `Runs the full flow: discovers the system DNS resolvers, characterizes every
+selected resolver, benchmarks them across query categories, ranks the results
 and explains them. Results are specific to this network, ISP, location and
 time of day.`,
 		Args: cobra.NoArgs,
@@ -91,14 +91,14 @@ time of day.`,
 	cmd.Flags().IntVar(&f.retries, "retries", base.Retries, "retries per failed query")
 	cmd.Flags().DurationVar(&f.retryInterval, "retry-interval", base.RetryInterval, "wait between retries")
 	cmd.Flags().IntVar(&f.concurrency, "concurrency", base.Concurrency, "maximum queries in flight at once")
-	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "starting spacing between any two query launches, across all servers; adapts between a quarter of it and 8x it (0 disables pacing)")
-	cmd.Flags().DurationVar(&f.gap, "gap", base.PerServerGap, "gap between consecutive queries to the same server")
+	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "starting spacing between any two query launches, across all resolvers; adapts between a quarter of it and 8x it (0 disables pacing)")
+	cmd.Flags().DurationVar(&f.gap, "gap", base.PerServerGap, "gap between consecutive queries to the same resolver")
 	cmd.Flags().StringVar(&f.session, "session", string(base.Session), "connection reuse: cold or persistent")
 	cmd.Flags().Int64Var(&f.seed, "seed", 0, "random seed (0 picks a random seed)")
-	cmd.Flags().BoolVar(&f.noTriage, "no-triage", false, "skip the triage phase and benchmark every server")
-	cmd.Flags().DurationVar(&f.triageThreshold, "triage-threshold", base.TriageThreshold, "best RTT above this benches a server during triage")
-	cmd.Flags().IntVar(&f.triageAttempts, "triage-attempts", base.TriageAttempts, "probes per server during triage")
-	cmd.Flags().BoolVar(&f.forceAll, "force-all", false, "keep slow servers active instead of benching them")
+	cmd.Flags().BoolVar(&f.noTriage, "no-triage", false, "skip the triage phase and benchmark every resolver")
+	cmd.Flags().DurationVar(&f.triageThreshold, "triage-threshold", base.TriageThreshold, "best RTT above this sidelines a built-in resolver during triage")
+	cmd.Flags().IntVar(&f.triageAttempts, "triage-attempts", base.TriageAttempts, "probes per resolver during triage")
+	cmd.Flags().BoolVar(&f.forceAll, "force-all", false, "keep slow built-in resolvers active instead of benching them")
 	cmd.Flags().StringVar(&f.ranking, "ranking", string(model.RankLatency), "ranking mode: latency, browsing or reliability")
 	cmd.Flags().StringVar(&f.sortKey, "sort", "median", "sort for the detailed table: cost, mean, median, p95, loss or name")
 	cmd.Flags().StringVar(&f.category, "category", "", "category shown in the detailed table (default: first enabled)")
@@ -146,7 +146,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 		return err
 	}
 	if len(selection.servers) == 0 {
-		return fmt.Errorf("no servers matched the given selection")
+		return fmt.Errorf("no resolvers matched the given selection")
 	}
 	if !f.quiet {
 		printForwarderNotes(out, systemServers(selection))
@@ -168,7 +168,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 		var spinner *ui.Spinner
 		if !f.quiet {
 			fmt.Fprintln(out)
-			label := fmt.Sprintf("Characterizing %s — DNSSEC, NXDOMAIN", countNoun(len(selection.servers), "server"))
+			label := fmt.Sprintf("Characterizing %s — DNSSEC, NXDOMAIN", countNoun(len(selection.servers), "resolver"))
 			spinner = ui.NewSpinner(out, stdoutIsTTY(), label, len(selection.servers))
 			spinner.Start()
 		}
@@ -179,7 +179,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 			}
 		})
 		if spinner != nil {
-			final := ui.Green("✓") + fmt.Sprintf(" Characterized %s in %s", countNoun(len(selection.servers), "server"), time.Since(probeStart).Round(100*time.Millisecond))
+			final := ui.Green("✓") + fmt.Sprintf(" Characterized %s in %s", countNoun(len(selection.servers), "resolver"), time.Since(probeStart).Round(100*time.Millisecond))
 			if ctx.Err() != nil {
 				final = ui.Yellow("⚠") + " Characterization interrupted"
 			}
@@ -526,7 +526,7 @@ func printFinalReport(out io.Writer, res *model.RunResult, f *runFlags, rankingM
 		}
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "%s\n", ui.Bold("Detailed metrics — "+cat.Label()+" category"))
-		fmt.Fprint(out, ui.RenderMetricsTable(res, cat, f.sortKey))
+		fmt.Fprint(out, ui.RenderMetricsTable(res, cat, f.sortKey, terminalWidth(out)))
 	}
 	fmt.Fprintln(out)
 	fmt.Fprint(out, ui.RenderReportFooter(exportPaths, f.open))

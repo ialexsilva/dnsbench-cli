@@ -34,29 +34,29 @@ func introSections() []introSection {
 		{
 			"What is DNS?",
 			`DNS (Domain Name System) is the phone book of the internet. Every time you
-open a website, your device asks a DNS server to translate a name such as
-example.com into an IP address it can connect to. A recursive DNS server does
+open a website, your device asks a DNS resolver to translate a name such as
+example.com into an IP address it can connect to. A recursive DNS resolver does
 that lookup on your behalf, walking the chain of authoritative servers and
 caching the answers it finds. Almost every online action starts with one or
 more DNS lookups, so a slow or unreliable resolver adds delay to everything.`,
 		},
 		{
 			"What does this test measure?",
-			`dnsbench measures several independent things about each DNS server:
+			`dnsbench measures several independent things about each DNS resolver:
 
-  - Cached latency: how fast the server answers for popular names it almost
+  - Cached latency: how fast the resolver answers for popular names it almost
     certainly already has in its cache. This is the answer speed you feel most
     often in daily browsing.
-  - Uncached latency: how fast the server resolves names guaranteed not to be
+  - Uncached latency: how fast the resolver resolves names guaranteed not to be
     in its cache (this requires a zone you control, so each query is a real
     cache miss).
-  - Recursive-path latency: how fast the server walks the TLD infrastructure
+  - Recursive-path latency: how fast the resolver walks the TLD infrastructure
     for random names, exercising its full recursion path.
   - Loss and stability: how many queries go unanswered and how much the
     latency jitters between consecutive queries.
-  - DNSSEC validation: whether the server cryptographically validates signed
+  - DNSSEC validation: whether the resolver cryptographically validates signed
     answers and rejects forged ones.
-  - NXDOMAIN handling: whether the server honestly reports that a name does
+  - NXDOMAIN handling: whether the resolver honestly reports that a name does
     not exist, or intercepts the error and redirects you to ads or a search
     page.`,
 		},
@@ -65,7 +65,7 @@ more DNS lookups, so a slow or unreliable resolver adds delay to everything.`,
 			`DNS queries are tiny, so any competing traffic distorts the measurement.
 A download, a video stream or a video call fills the link and its buffers,
 inflating latency and causing spurious loss that gets blamed on the DNS
-server. For trustworthy numbers, run the test while nobody is using the
+resolver. For trustworthy numbers, run the test while nobody is using the
 network for anything else.`,
 		},
 		{

@@ -56,10 +56,11 @@ func RenderRankingList(res *model.RunResult, mode model.RankMode, tieA, tieB str
 	b.WriteString(Bold("Ranked by "+mode.Label()) + Gray(" — latency cost in ms, lower is better") + "\n")
 	writeRankingLegend(&b, visible, system, tieA)
 	if len(scores) == 0 {
-		b.WriteString(Gray("  no servers completed the benchmark") + "\n")
+		b.WriteString(Gray("  no resolvers completed the benchmark") + "\n")
 		b.WriteString(renderUnrankedSummary(res, 0))
 		return b.String()
 	}
+	b.WriteString(rankingHeader() + "\n")
 	best := scores[0].TotalMs
 	worst := 0.0
 	for _, sc := range scores {
@@ -113,9 +114,11 @@ func writeRankingLegend(b *strings.Builder, scores []model.Score, system map[str
 func rankingRow(res *model.RunResult, sc model.Score, best, worst float64, cats []model.Category, system map[string]bool, tieA, tieB string) string {
 	nameCell := TruncatePad(serverName(res, sc.ServerID), rankNameWidth)
 	rankCell := padLeft(fmt.Sprintf("%d", sc.Rank), 4)
+	currentCell := " "
 	switch {
 	case system[sc.ServerID]:
 		nameCell = Cyan(nameCell)
+		currentCell = Cyan("●")
 	case sc.Rank == 1:
 		nameCell = Bold(nameCell)
 	}
@@ -142,7 +145,18 @@ func rankingRow(res *model.RunResult, sc model.Score, best, worst float64, cats 
 	if sc.ServerID == tieA || sc.ServerID == tieB {
 		marker = Dim("  ≈ tied")
 	}
-	return fmt.Sprintf("%s  %s  %s%s%s %s%s", rankCell, nameCell, bar, scoreCell, penCell, lossCell, marker)
+	return fmt.Sprintf("%s %s  %s  %s%s%s %s%s", currentCell, rankCell, nameCell, bar, scoreCell, penCell, lossCell, marker)
+}
+
+func rankingHeader() string {
+	return Bold(fmt.Sprintf(
+		"  %s  %s  %s%s %s",
+		padLeft("#", 4),
+		padRight("resolver", rankNameWidth),
+		strings.Repeat(" ", rankBarWidth),
+		padLeft("cost", 10),
+		padLeft("loss", 7),
+	))
 }
 
 func penaltyTotal(sc model.Score) float64 {

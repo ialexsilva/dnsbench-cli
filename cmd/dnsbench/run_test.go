@@ -19,6 +19,9 @@ func TestRunCommandModernDefaults(t *testing.T) {
 	if got := cmd.Flags().Lookup("ranking").DefValue; got != string(model.RankLatency) {
 		t.Fatalf("--ranking default = %q, want %q", got, model.RankLatency)
 	}
+	if got := cmd.Flags().Lookup("triage-threshold").DefValue; got != "200ms" {
+		t.Fatalf("--triage-threshold default = %q, want 200ms", got)
+	}
 }
 
 func TestProbeCommandHasNoPacingFlag(t *testing.T) {

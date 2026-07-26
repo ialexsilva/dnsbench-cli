@@ -93,7 +93,7 @@ func TestLiveNonTTY(t *testing.T) {
 	runLive(t, l, events)
 	out := buf.String()
 	for _, want := range []string{
-		"dnsbench — benchmarking 2 servers",
+		"dnsbench — benchmarking 2 resolvers",
 		"progress  10%",
 		"progress  50%",
 		"progress 100%",
@@ -137,7 +137,7 @@ func TestLiveTTYClosedImmediately(t *testing.T) {
 	if !strings.Contains(out, "\x1b[?1049h") || !strings.Contains(out, "\x1b[?1049l") {
 		t.Errorf("TTY output missing alternate-screen lifecycle\n%q", out)
 	}
-	if !strings.Contains(out, "dnsbench — benchmarking 2 servers") {
+	if !strings.Contains(out, "dnsbench — evaluating 2 resolvers") {
 		t.Errorf("TTY output missing header\n%q", out)
 	}
 }
@@ -201,16 +201,20 @@ func TestLiveModelUpdatesStateWithoutWritingDirectly(t *testing.T) {
 	}
 }
 
-func TestLiveProgressSwitchesWhenFirstMeasuredRoundStarts(t *testing.T) {
+func TestLiveProgressShowsTriageWarmupAndBenchmarkPhases(t *testing.T) {
 	disableColors(t)
 	cfg := model.DefaultBenchConfig(model.ModeQuick)
 	cfg.Rounds = 250
+	cfg.WarmupRounds = 2
 	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
 	l.width = 80
 
 	first := l.progressLine()
-	if !strings.Contains(first, "preparing benchmark") {
-		t.Fatalf("initial progress is missing the preparation message: %q", first)
+	if !strings.Contains(first, "triaging resolvers…") {
+		t.Fatalf("initial progress is missing the triage phase: %q", first)
+	}
+	if strings.Contains(first, "/") {
+		t.Fatalf("triage progress contains a transient counter: %q", first)
 	}
 	if strings.Contains(first, "0%") || strings.Contains(first, "round 0/") {
 		t.Fatalf("initial progress should be indeterminate instead of showing zero: %q", first)
@@ -221,27 +225,86 @@ func TestLiveProgressSwitchesWhenFirstMeasuredRoundStarts(t *testing.T) {
 		t.Fatalf("preparation tick returned model=%T cmd=%v", updated, cmd)
 	}
 	if second := l.progressLine(); second == first {
-		t.Fatalf("preparation bar did not move after a tick: %q", second)
+		t.Fatalf("triage bar did not move after a tick: %q", second)
 	}
 
 	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 0})
-	if warmup := l.progressLine(); !strings.Contains(warmup, "preparing benchmark") {
-		t.Fatalf("warmup should still be shown as preparation: %q", warmup)
+	if triage := l.progressLine(); !strings.Contains(triage, "triaging resolvers…") {
+		t.Fatalf("triage query changed the phase prematurely: %q", triage)
+	}
+	for _, server := range liveServers() {
+		l.handle(model.Event{Type: model.EvTriage, Triage: &model.TriageResult{
+			ServerID: server.ID,
+			State:    model.StateActive,
+		}})
+	}
+	if warmup := l.progressLine(); !strings.Contains(warmup, "warming up resolvers…") {
+		t.Fatalf("completed triage did not enter warmup: %q", warmup)
+	} else if strings.Contains(warmup, "/") {
+		t.Fatalf("warmup progress contains a transient counter: %q", warmup)
+	}
+
+	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 0})
+	if warmup := l.progressLine(); !strings.Contains(warmup, "warming up resolvers…") {
+		t.Fatalf("first warmup round is not visible: %q", warmup)
+	}
+	l.handle(model.Event{Type: model.EvRoundDone, Round: 0})
+	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 0})
+	if warmup := l.progressLine(); !strings.Contains(warmup, "warming up resolvers…") {
+		t.Fatalf("second warmup round is not visible: %q", warmup)
 	}
 
 	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 1})
 	running := l.progressLine()
-	if strings.Contains(running, "preparing benchmark") {
+	if strings.Contains(running, "warming up") || strings.Contains(running, "triaging") {
 		t.Fatalf("progress remained in preparation after measurement started: %q", running)
 	}
-	if !strings.Contains(running, "  0%") || !strings.Contains(running, "round 1/250") {
+	if !strings.Contains(running, "0%") || !strings.Contains(running, "round 1/250") {
 		t.Fatalf("first measured query progress = %q, want 0%% and round 1/250", running)
+	}
+
+	firstSample := sampleEvent("a", model.CatCached, 8, false)
+	firstSample.Sample.Round = 1
+	l.handle(firstSample)
+	if inProgress := l.progressLine(); !strings.Contains(inProgress, "1%") {
+		t.Fatalf("first measured sample progress = %q, want 1%%", inProgress)
 	}
 
 	l.handle(model.Event{Type: model.EvRoundDone, Round: 1})
 	completed := l.progressLine()
 	if !strings.Contains(completed, "  1%") || !strings.Contains(completed, "round 1/250") {
 		t.Fatalf("first completed round progress = %q, want 1%% and round 1/250", completed)
+	}
+}
+
+func TestLiveQuickProgressStartsAtZeroAndAdvancesWithinFirstRound(t *testing.T) {
+	disableColors(t)
+	cfg := model.DefaultBenchConfig(model.ModeQuick)
+	cfg.TriageEnabled = false
+	cfg.WarmupRounds = 0
+	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
+	l.width = 80
+
+	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 1})
+	started := l.progressLine()
+	if !strings.Contains(started, "0%") || !strings.Contains(started, "round 1/50") {
+		t.Fatalf("first quick round progress = %q, want 0%% and round 1/50", started)
+	}
+	if strings.ContainsAny(started, "░▒▓") || strings.Contains(started, "benchmarking ·") {
+		t.Fatalf("first quick round still uses the indeterminate benchmark bar: %q", started)
+	}
+
+	firstSample := sampleEvent("a", model.CatCached, 8, false)
+	firstSample.Sample.Round = 1
+	l.handle(firstSample)
+	if inProgress := l.progressLine(); !strings.Contains(inProgress, "1%") {
+		t.Fatalf("first quick sample progress = %q, want 1%% before round completion", inProgress)
+	}
+
+	l.handle(model.Event{Type: model.EvRoundDone, Round: 1})
+	completed := l.progressLine()
+	if !strings.Contains(completed, "  2%") {
+		t.Fatalf("first completed quick round progress = %q, want 2%%", completed)
 	}
 }
 
@@ -261,6 +324,54 @@ func TestLiveProgressDoesNotReach100BeforeFinalRound(t *testing.T) {
 	l.handle(model.Event{Type: model.EvRoundDone, Round: 250})
 	if complete := l.progressLine(); !strings.Contains(complete, "100%") {
 		t.Fatalf("completed progress = %q, want 100%%", complete)
+	}
+}
+
+func TestLiveProgressUpdatesElapsedOnClockAndETAOnCompletedRounds(t *testing.T) {
+	disableColors(t)
+	cfg := model.DefaultBenchConfig(model.ModeQuick)
+	cfg.TriageEnabled = false
+	cfg.WarmupRounds = 0
+	cfg.Rounds = 20
+	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
+	l.width = 120
+	base := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
+	l.benchmarkStart = base
+
+	completeRound := func(round int, elapsed time.Duration) {
+		l.round = round
+		l.roundStarted = round
+		l.noteRoundCompleted(round, base.Add(elapsed))
+	}
+	completeRound(1, 7*time.Second)
+	completeRound(2, 15*time.Second)
+	completeRound(3, 24*time.Second)
+	if progress := l.progressLine(); !strings.Contains(progress, "ETA ~") {
+		t.Fatalf("initial ETA should use the tilde placeholder: %q", progress)
+	}
+
+	completeRound(4, 34*time.Second)
+	_, _ = l.Update(livePrepareTickMsg{at: base.Add(34 * time.Second)})
+	progress := l.progressLine()
+	if !strings.Contains(progress, "elapsed 0:34") || !strings.Contains(progress, "ETA ~2:15") {
+		t.Fatalf("stable progress line = %q, want elapsed 0:34 and rounded ETA 2:15", progress)
+	}
+	if got, want := l.etaEstimate, 135*time.Second; got != want {
+		t.Fatalf("ETA = %s, want %s", got, want)
+	}
+
+	l.handle(sampleEvent("a", model.CatCached, 8, false))
+	if afterSample := l.progressLine(); afterSample != progress {
+		t.Fatalf("query callback changed timing text:\nbefore: %q\nafter:  %q", progress, afterSample)
+	}
+
+	_, cmd := l.Update(livePrepareTickMsg{at: base.Add(35 * time.Second)})
+	if cmd == nil {
+		t.Fatal("clock tick did not schedule the next one-second update")
+	}
+	afterTick := l.progressLine()
+	if !strings.Contains(afterTick, "elapsed 0:35") || !strings.Contains(afterTick, "ETA ~2:15") {
+		t.Fatalf("clock tick changed ETA unexpectedly: %q", afterTick)
 	}
 }
 
@@ -303,8 +414,7 @@ func TestLiveLossAndInvalidAreLabeledSeparately(t *testing.T) {
 }
 
 func TestLiveHighlightsServerUnderTest(t *testing.T) {
-	SetColorEnabled(true)
-	t.Cleanup(func() { SetColorEnabled(false) })
+	enableColors(t)
 	cfg := model.DefaultBenchConfig(model.ModeQuick)
 	cfg.Categories = []model.Category{model.CatCached}
 	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "name")
@@ -328,6 +438,9 @@ func TestLiveHighlightsServerUnderTest(t *testing.T) {
 	}
 	if strings.Contains(l.renderFrame(), "\x1b[36mAlpha DNS") {
 		t.Fatalf("highlight persisted after the query finished")
+	}
+	if legend := l.legendLine(); !strings.Contains(legend, Cyan("name")+" = querying") {
+		t.Fatalf("legend does not explain the cyan activity state: %q", legend)
 	}
 }
 
@@ -382,7 +495,7 @@ func TestLiveSharedP90ScaleMarksOutlier(t *testing.T) {
 		t.Fatalf("P90 scale = %.1f, want 90.0", got)
 	}
 	frame := l.renderFrame()
-	if !strings.Contains(frame, "shared scale: P90 90.0 ms") {
+	if !strings.Contains(frame, "scale P90 90.0 ms") {
 		t.Fatalf("frame missing shared scale:\n%s", frame)
 	}
 	if !strings.Contains(frame, "›") {
@@ -413,7 +526,7 @@ func TestLiveLatencyMetricMatchesSort(t *testing.T) {
 				t.Fatalf("latency metric = %q, want %q", got, sortKey)
 			}
 			frame := l.renderFrame()
-			if !strings.Contains(frame, "live order and bars: "+sortKey+" latency") {
+			if !strings.Contains(frame, sortKey+" · lower is better") {
 				t.Fatalf("frame does not describe %s metric:\n%s", sortKey, frame)
 			}
 			if !strings.Contains(frame, wantValue) {
@@ -427,10 +540,10 @@ func TestLiveNonLatencySortDescriptions(t *testing.T) {
 	disableColors(t)
 	cfg := model.DefaultBenchConfig(model.ModeQuick)
 	for sortKey, want := range map[string]string{
-		"loss":  "live order: loss · bars: median latency",
-		"name":  "live order: name · bars: median latency",
-		"cost":  "live order: median latency · final latency cost after benchmark",
-		"score": "live order: median latency · final latency cost after benchmark",
+		"loss":  "order loss · bars median · lower is better",
+		"name":  "order name · bars median · lower is better",
+		"cost":  "order median · final ranking uses latency cost",
+		"score": "order median · final ranking uses latency cost",
 	} {
 		t.Run(sortKey, func(t *testing.T) {
 			l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, sortKey)
@@ -481,9 +594,10 @@ func TestLiveResponsiveWidthsDoNotWrap(t *testing.T) {
 	}
 }
 
-func TestLiveServerRowsUseCompactBarsWithoutRepeatedLabelsOrMarkers(t *testing.T) {
+func TestLiveServerRowsUseCategoryMarkersWithoutColor(t *testing.T) {
 	disableColors(t)
 	cfg := model.DefaultBenchConfig(model.ModeQuick)
+	cfg.Categories = model.AllCategories()
 	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
 	l.width = 100
 	for i, category := range cfg.Categories {
@@ -494,11 +608,13 @@ func TestLiveServerRowsUseCompactBarsWithoutRepeatedLabelsOrMarkers(t *testing.T
 	if strings.Contains(lines, "cached") || strings.Contains(lines, "recursive/TLD") {
 		t.Fatalf("server rows repeated category labels already present in legend:\n%s", lines)
 	}
-	if strings.Contains(lines, "■") {
-		t.Fatalf("server rows repeated category markers already present in legend:\n%s", lines)
+	for _, marker := range []string{"C ", "U ", "T "} {
+		if !strings.Contains(lines, marker) {
+			t.Fatalf("server rows are missing the %q category marker:\n%s", marker, lines)
+		}
 	}
-	if layout.barWidth < 32 {
-		t.Fatalf("compact layout = %+v, want the marker space reassigned to the bar", layout)
+	if !layout.categoryMarkers {
+		t.Fatalf("no-color layout did not reserve category markers: %+v", layout)
 	}
 	if strings.Contains(lines, "█") || !strings.Contains(lines, "▄") || !strings.Contains(lines, "▀") {
 		t.Fatalf("server rows must use touching lower/upper half-height bars:\n%s", lines)
@@ -569,7 +685,7 @@ func TestLiveTTYFrame(t *testing.T) {
 	for _, want := range []string{
 		"Alpha DNS",
 		"cached", "recursive/TLD",
-		"Beta DNS — out of contention: too slow in triage",
+		"Beta DNS — sidelined: too slow in triage",
 		"connectivity lost — benchmark paused (default route gone)",
 		"8.0 ms",
 	} {

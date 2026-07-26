@@ -14,6 +14,22 @@ func disableColors(t *testing.T) {
 	t.Cleanup(func() { SetColorEnabled(prev) })
 }
 
+func enableColors(t *testing.T) {
+	t.Helper()
+	orig, had := os.LookupEnv("NO_COLOR")
+	prev := ColorEnabled()
+	os.Unsetenv("NO_COLOR")
+	SetColorEnabled(true)
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("NO_COLOR", orig)
+		} else {
+			os.Unsetenv("NO_COLOR")
+		}
+		SetColorEnabled(prev)
+	})
+}
+
 func TestFormatMs(t *testing.T) {
 	cases := []struct {
 		in   float64

@@ -103,7 +103,17 @@ type benchmarkEventMsg struct {
 }
 
 type eventsClosedMsg struct{}
-type livePrepareTickMsg struct{}
+type livePrepareTickMsg struct {
+	at time.Time
+}
+
+type livePhase uint8
+
+const (
+	livePhaseTriage livePhase = iota
+	livePhaseWarmup
+	livePhaseBenchmark
+)
 
 func (ls *liveServer) totalSamples() int {
 	total, _, _ := ls.counts()
@@ -128,31 +138,56 @@ func (ls *liveServer) counts() (total, lost, invalid int) {
 }
 
 type Live struct {
-	servers      []model.Server
-	cfg          model.BenchConfig
-	out          io.Writer
-	isTTY        bool
-	sortKey      string
-	categories   []model.Category
-	byID         map[string]*liveServer
-	inflight     map[string]bool
-	start        time.Time
-	round        int
-	roundStarted int
-	prepareFrame int
-	lastPctTen   int
-	noticeText   string
-	noticeColor  func(string) string
-	width        int
-	height       int
+	servers        []model.Server
+	cfg            model.BenchConfig
+	out            io.Writer
+	isTTY          bool
+	sortKey        string
+	categories     []model.Category
+	byID           map[string]*liveServer
+	inflight       map[string]bool
+	triaged        map[string]bool
+	phase          livePhase
+	triageDone     int
+	warmupDone     int
+	warmupStarted  int
+	start          time.Time
+	benchmarkStart time.Time
+	displayElapsed time.Duration
+	etaEstimate    time.Duration
+	etaSamples     []time.Duration
+	etaLastRound   int
+	etaLastAt      time.Time
+	etaReady       bool
+	round          int
+	roundStarted   int
+	measuredDone   int
+	measuredTotal  int
+	prepareFrame   int
+	lastPctTen     int
+	noticeText     string
+	noticeColor    func(string) string
+	width          int
+	height         int
 }
 
-const maxNoticeLines = 2
+const (
+	maxNoticeLines                = 2
+	liveETAWindow                 = 5
+	liveETAInitialCompletedRounds = 3
+	liveETARounding               = 5 * time.Second
+)
 
 func NewLive(servers []model.Server, cfg model.BenchConfig, out io.Writer, isTTY bool, sortKey string) *Live {
 	cats := cfg.Categories
 	if len(cats) == 0 {
 		cats = model.AllCategories()
+	}
+	phase := livePhaseBenchmark
+	if cfg.TriageEnabled {
+		phase = livePhaseTriage
+	} else if cfg.WarmupRounds > 0 {
+		phase = livePhaseWarmup
 	}
 	byID := make(map[string]*liveServer, len(servers))
 	for _, s := range servers {
@@ -171,6 +206,8 @@ func NewLive(servers []model.Server, cfg model.BenchConfig, out io.Writer, isTTY
 		categories: cats,
 		byID:       byID,
 		inflight:   make(map[string]bool, len(servers)),
+		triaged:    make(map[string]bool, len(servers)),
+		phase:      phase,
 		start:      time.Now(),
 		width:      liveFallbackWidth,
 		height:     liveFallbackHeight,
@@ -180,7 +217,7 @@ func NewLive(servers []model.Server, cfg model.BenchConfig, out io.Writer, isTTY
 func (l *Live) Run(events <-chan model.Event) {
 	l.start = time.Now()
 	if !l.isTTY {
-		fmt.Fprintf(l.out, "dnsbench — benchmarking %d servers\n", len(l.servers))
+		fmt.Fprintf(l.out, "dnsbench — benchmarking %s\n", resolverCount(len(l.servers)))
 		for ev := range events {
 			l.handle(ev)
 		}
@@ -236,10 +273,14 @@ func (l *Live) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventsClosedMsg:
 		return l, tea.Quit
 	case livePrepareTickMsg:
-		if l.roundStarted > 0 {
-			return l, nil
+		at := msg.at
+		if at.IsZero() {
+			at = time.Now()
 		}
-		l.prepareFrame++
+		l.updateDisplayedElapsed(at)
+		if l.round <= 0 {
+			l.prepareFrame++
+		}
 		return l, l.prepareTick()
 	}
 	return l, nil
@@ -250,27 +291,44 @@ func (l *Live) View() string {
 }
 
 func (l *Live) prepareTick() tea.Cmd {
-	return tea.Tick(time.Second/liveFPS, func(time.Time) tea.Msg {
-		return livePrepareTickMsg{}
+	interval := time.Second
+	if l.round <= 0 {
+		interval = time.Second / liveFPS
+	}
+	return tea.Tick(interval, func(at time.Time) tea.Msg {
+		return livePrepareTickMsg{at: at}
 	})
 }
 
 func (l *Live) handle(ev model.Event) {
 	switch ev.Type {
 	case model.EvQueryStart:
-		l.noteRoundStarted(ev.Round)
+		if ev.Round > 0 {
+			l.noteRoundStarted(ev.Round)
+		} else if l.phase != livePhaseTriage {
+			l.noteWarmupStarted()
+		}
 		if ev.ServerID != "" {
 			l.inflight[ev.ServerID] = true
 		}
 	case model.EvSample:
 		if ev.Sample != nil {
-			l.noteRoundStarted(ev.Sample.Round)
+			if ev.Sample.Warmup {
+				l.noteWarmupStarted()
+			} else {
+				l.noteRoundStarted(ev.Sample.Round)
+			}
 			delete(l.inflight, ev.Sample.ServerID)
 		}
 		l.recordSample(ev.Sample)
 	case model.EvRoundDone:
-		l.round = ev.Round
-		l.noteRoundStarted(ev.Round)
+		if ev.Round == 0 && l.phase == livePhaseWarmup {
+			l.warmupDone = min(l.cfg.WarmupRounds, l.warmupDone+1)
+		} else {
+			l.round = ev.Round
+			l.noteRoundStarted(ev.Round)
+			l.noteRoundCompleted(ev.Round, time.Now())
+		}
 		if !l.isTTY {
 			l.printProgress()
 		}
@@ -278,6 +336,7 @@ func (l *Live) handle(ev model.Event) {
 		if ev.Triage != nil {
 			delete(l.inflight, ev.Triage.ServerID)
 			l.setState(ev.Triage.ServerID, ev.Triage.State, ev.Triage.Reason, false)
+			l.noteTriageDone(ev.Triage.ServerID)
 		}
 	case model.EvStateChange:
 		delete(l.inflight, ev.ServerID)
@@ -294,9 +353,105 @@ func (l *Live) handle(ev model.Event) {
 }
 
 func (l *Live) noteRoundStarted(round int) {
+	if round <= 0 {
+		return
+	}
+	l.phase = livePhaseBenchmark
+	if l.benchmarkStart.IsZero() {
+		l.benchmarkStart = time.Now()
+		l.displayElapsed = 0
+		l.measuredTotal = l.expectedMeasuredSamples()
+	}
 	if round > l.roundStarted {
 		l.roundStarted = round
 	}
+}
+
+func (l *Live) updateDisplayedElapsed(at time.Time) {
+	if l.benchmarkStart.IsZero() || at.Before(l.benchmarkStart) {
+		return
+	}
+	l.displayElapsed = at.Sub(l.benchmarkStart)
+}
+
+func (l *Live) noteRoundCompleted(round int, at time.Time) {
+	if round <= 0 || at.IsZero() || l.benchmarkStart.IsZero() {
+		return
+	}
+
+	previousRound := l.etaLastRound
+	previousAt := l.etaLastAt
+	if previousRound == 0 {
+		previousAt = l.benchmarkStart
+	}
+	roundDelta := round - previousRound
+	if roundDelta <= 0 || !at.After(previousAt) {
+		return
+	}
+
+	perRound := at.Sub(previousAt) / time.Duration(roundDelta)
+	l.etaLastRound = round
+	l.etaLastAt = at
+	if perRound <= 0 {
+		return
+	}
+
+	l.etaSamples = append(l.etaSamples, perRound)
+	if len(l.etaSamples) > liveETAWindow {
+		copy(l.etaSamples, l.etaSamples[len(l.etaSamples)-liveETAWindow:])
+		l.etaSamples = l.etaSamples[:liveETAWindow]
+	}
+
+	rounds := l.cfg.Rounds
+	if round <= liveETAInitialCompletedRounds || round >= rounds {
+		l.etaReady = false
+		l.etaEstimate = 0
+		return
+	}
+
+	var total time.Duration
+	for _, sample := range l.etaSamples {
+		total += sample
+	}
+	average := total / time.Duration(len(l.etaSamples))
+	estimate := average * time.Duration(rounds-round)
+	l.etaEstimate = roundLiveETA(estimate)
+	l.etaReady = l.etaEstimate > 0
+}
+
+func roundLiveETA(estimate time.Duration) time.Duration {
+	if estimate <= 0 {
+		return 0
+	}
+	rounded := estimate.Round(liveETARounding)
+	if rounded < liveETARounding {
+		return liveETARounding
+	}
+	return rounded
+}
+
+func (l *Live) noteWarmupStarted() {
+	if l.phase == livePhaseTriage || l.cfg.WarmupRounds <= 0 {
+		return
+	}
+	l.phase = livePhaseWarmup
+	l.warmupStarted = min(l.cfg.WarmupRounds, max(l.warmupStarted, l.warmupDone+1))
+}
+
+func (l *Live) noteTriageDone(id string) {
+	if id == "" || l.triaged[id] {
+		return
+	}
+	l.triaged[id] = true
+	l.triageDone++
+	if l.triageDone < len(l.servers) {
+		return
+	}
+	if l.cfg.WarmupRounds > 0 {
+		l.phase = livePhaseWarmup
+		return
+	}
+	l.phase = livePhaseBenchmark
 }
 
 func connLine(base, msg string) string {
@@ -313,6 +468,9 @@ func (l *Live) recordSample(s *model.Sample) {
 	ls := l.byID[s.ServerID]
 	if ls == nil {
 		return
+	}
+	if s.Round > 0 {
+		l.measuredDone++
 	}
 	agg := ls.cats[s.Category]
 	if agg == nil {
@@ -345,7 +503,7 @@ func (l *Live) setState(id string, state model.ServerState, reason string, annou
 	if state == model.StateActive && !announceActive {
 		return
 	}
-	line := ls.server.DisplayName() + ": " + state.Label()
+	line := ls.server.DisplayName() + ": " + uiStateLabel(state)
 	if reason != "" {
 		line += " (" + reason + ")"
 	}
@@ -432,7 +590,7 @@ func (l *Live) renderFrame() string {
 	layout := l.makeRowLayout(visibleActive)
 
 	var b strings.Builder
-	l.writeFrameLine(&b, Bold(fmt.Sprintf("dnsbench — benchmarking %d servers", len(l.servers))))
+	l.writeFrameLine(&b, Bold(l.headerLine(len(active), len(inactive))))
 	l.writeFrameLine(&b, l.progressLine())
 	if showMetric {
 		l.writeFrameLine(&b, l.metricLine(metric, scale))
@@ -450,7 +608,7 @@ func (l *Live) renderFrame() string {
 		}
 	}
 	for _, ls := range inactive[:inactiveShown] {
-		line := ls.server.DisplayName() + " — " + ls.state.Label()
+		line := ls.server.DisplayName() + " — " + uiStateLabel(ls.state)
 		if ls.reason != "" {
 			line += ": " + ls.reason
 		}
@@ -462,19 +620,21 @@ func (l *Live) renderFrame() string {
 }
 
 func (l *Live) progressLine() string {
-	rounds := l.cfg.Rounds
-	if l.roundStarted <= 0 {
-		return l.preparingLine()
+	switch l.phase {
+	case livePhaseTriage:
+		return l.indeterminateLine("triaging resolvers…")
+	case livePhaseWarmup:
+		return l.warmupLine()
 	}
 
-	pct := 0.0
-	if rounds > 0 {
-		pct = float64(l.round) * 100 / float64(rounds)
-		if pct > 100 {
-			pct = 100
-		}
+	rounds := l.cfg.Rounds
+	if l.roundStarted <= 0 {
+		return l.indeterminateLine("starting benchmark…")
 	}
-	elapsed := formatElapsed(time.Since(l.start))
+
+	pct := l.benchmarkProgressPct()
+	elapsedDuration := l.displayElapsed
+	elapsed := formatElapsed(elapsedDuration)
 	pctText := "0%"
 	if pct > 0 {
 		displayPct := max(1, int(math.Floor(pct)))
@@ -484,21 +644,52 @@ func (l *Live) progressLine() string {
 		pctText = fmt.Sprintf("%d%%", displayPct)
 	}
 	displayRound := max(l.round, l.roundStarted)
-	suffix := fmt.Sprintf("%4s  round %d/%d  elapsed %s", pctText, displayRound, rounds, elapsed)
+	suffix := fmt.Sprintf("%4s · round %d/%d · elapsed %s", pctText, displayRound, rounds, elapsed)
+	if l.round < rounds && l.width >= 72 {
+		if l.etaReady {
+			suffix += " · ETA ~" + formatElapsed(l.etaEstimate)
+		} else {
+			suffix += " · ETA ~"
+		}
+	}
 	barWidth := min(liveProgressWidth, l.width-visibleWidth(suffix)-4)
 	if barWidth < 4 {
 		return "  " + suffix
 	}
-	barValue := pct
-	if barValue <= 0 {
-		barValue = 0.01
-	}
-	bar := liveProgressBar(barValue, 100, barWidth)
+	bar := liveProgressBar(pct, 100, barWidth)
 	return "  " + bar + "  " + suffix
 }
 
-func (l *Live) preparingLine() string {
-	const suffix = "preparing benchmark…"
+func (l *Live) expectedMeasuredSamples() int {
+	if l.cfg.Rounds <= 0 || len(l.categories) == 0 {
+		return 0
+	}
+	active := 0
+	for _, server := range l.byID {
+		if server.state == model.StateActive {
+			active++
+		}
+	}
+	return active * len(l.categories) * l.cfg.Rounds
+}
+
+func (l *Live) benchmarkProgressPct() float64 {
+	pct := 0.0
+	if l.cfg.Rounds > 0 && l.round > 0 {
+		pct = float64(l.round) * 100 / float64(l.cfg.Rounds)
+	}
+	if l.measuredTotal > 0 && l.measuredDone > 0 {
+		samplePct := float64(l.measuredDone) * 100 / float64(l.measuredTotal)
+		pct = max(pct, samplePct)
+	}
+	return min(100, pct)
+}
+
+func (l *Live) warmupLine() string {
+	return l.indeterminateLine("warming up resolvers…")
+}
+
+func (l *Live) indeterminateLine(suffix string) string {
 	barWidth := min(liveProgressWidth, l.width-visibleWidth(suffix)-4)
 	if barWidth < 6 {
 		return "  " + suffix
@@ -551,15 +742,26 @@ func liveProgressBar(value, maximum float64, width int) string {
 func (l *Live) legendLine() string {
 	parts := make([]string, 0, len(l.categories))
 	for _, c := range l.categories {
-		parts = append(parts, CategoryColor(c)("■")+" "+c.Label())
+		marker := CategoryColor(c)("■")
+		if !ColorEnabled() {
+			marker = categoryMarker(c)
+		}
+		parts = append(parts, marker+" "+c.Label())
 	}
-	switch {
-	case l.width >= liveFullLegend:
-		parts = append(parts, "loss = unanswered queries", "inv = unusable answers", "› = above P90")
-	case l.width >= liveTinyWidth:
-		parts = append(parts, "loss = unanswered", "inv = invalid", "› above P90")
-	default:
-		parts = append(parts, "L=loss", "I=invalid")
+	if ColorEnabled() {
+		parts = append(parts, Cyan("name")+" = querying")
+	}
+
+	candidates := [][]string{
+		{"loss = unanswered queries", "inv = unusable answers", "› = above P90"},
+		{"loss = unanswered", "inv = invalid", "› above P90"},
+		{"L=loss", "I=invalid"},
+	}
+	for _, extra := range candidates {
+		line := "  " + strings.Join(append(append([]string{}, parts...), extra...), "   ")
+		if visibleWidth(line) <= l.width || extra[0] == "L=loss" {
+			return line
+		}
 	}
 	return "  " + strings.Join(parts, "   ")
 }
@@ -571,24 +773,66 @@ func (l *Live) metricLine(metric string, scale float64) string {
 	}
 	switch l.sortKey {
 	case "loss":
-		return fmt.Sprintf("  live order: loss · bars: %s latency · shared scale: %s", metric, scaleText)
+		return fmt.Sprintf("  order loss · bars %s · lower is better · scale %s", metric, scaleText)
 	case "name":
-		return fmt.Sprintf("  live order: name · bars: %s latency · shared scale: %s", metric, scaleText)
+		return fmt.Sprintf("  order name · bars %s · lower is better · scale %s", metric, scaleText)
 	case "cost":
-		return fmt.Sprintf("  live order: median latency · final latency cost after benchmark · shared scale: %s", scaleText)
+		return fmt.Sprintf("  order median · final ranking uses latency cost · scale %s", scaleText)
 	default:
-		return fmt.Sprintf("  live order and bars: %s latency · shared scale: %s · lower is better", metric, scaleText)
+		return fmt.Sprintf("  %s · lower is better · scale %s", metric, scaleText)
 	}
 }
 
 func (l *Live) statusLine(shown, active, inactive int) string {
 	if l.width >= 80 {
 		return Gray(fmt.Sprintf(
-			"  showing top %d/%d active · %d sidelined · final report includes all",
+			"  showing top %d/%d active resolvers · %d sidelined · final report includes all",
 			shown, active, inactive,
 		))
 	}
-	return Gray(fmt.Sprintf("  shown %d/%d active · %d sidelined", shown, active, inactive))
+	return Gray(fmt.Sprintf("  shown %d/%d active resolvers · %d sidelined", shown, active, inactive))
+}
+
+func (l *Live) headerLine(active, inactive int) string {
+	switch l.phase {
+	case livePhaseTriage:
+		return "dnsbench — evaluating " + resolverCount(len(l.servers))
+	case livePhaseWarmup:
+		return livePhaseHeader("warming up", active, inactive)
+	default:
+		return livePhaseHeader("benchmarking", active, inactive)
+	}
+}
+
+func livePhaseHeader(action string, active, inactive int) string {
+	if inactive == 0 {
+		return fmt.Sprintf("dnsbench — %s %s", action, resolverCount(active))
+	}
+	return fmt.Sprintf(
+		"dnsbench — %s %d active %s · %d sidelined",
+		action,
+		active,
+		resolverNoun(active),
+		inactive,
+	)
+}
+
+func resolverCount(n int) string {
+	return fmt.Sprintf("%d %s", n, resolverNoun(n))
+}
+
+func resolverNoun(n int) string {
+	if n == 1 {
+		return "resolver"
+	}
+	return "resolvers"
+}
+
+func uiStateLabel(state model.ServerState) string {
+	if state == model.StateBenched {
+		return "sidelined"
+	}
+	return state.Label()
 }
 
 func (l *Live) writeFrameLine(b *strings.Builder, line string) {
@@ -604,14 +848,16 @@ type liveRowLayout struct {
 	showBars         bool
 	detailed         bool
 	tiny             bool
+	categoryMarkers  bool
 }
 
 func (l *Live) makeRowLayout(visible []*liveServer) liveRowLayout {
 	layout := liveRowLayout{
-		rankDigits: max(2, len(fmt.Sprint(max(1, len(l.servers))))),
-		showBars:   l.width >= liveNarrowWidth,
-		detailed:   l.width >= liveDetailedWidth,
-		tiny:       l.width < liveTinyWidth,
+		rankDigits:      max(2, len(fmt.Sprint(max(1, len(l.servers))))),
+		showBars:        l.width >= liveNarrowWidth,
+		detailed:        l.width >= liveDetailedWidth,
+		tiny:            l.width < liveTinyWidth,
+		categoryMarkers: !ColorEnabled() && len(l.categories) > 1,
 	}
 
 	setReliabilityWidth := func() {
@@ -630,6 +876,9 @@ func (l *Live) makeRowLayout(visible []*liveServer) liveRowLayout {
 
 	fixed := func(withBar bool) int {
 		n := layout.rankDigits + 2 + 2 + liveMsWidth + 2 + layout.reliabilityWidth
+		if layout.categoryMarkers {
+			n += 2
+		}
 		if withBar {
 			n++ // Space between the track and latency value.
 		}
@@ -720,6 +969,10 @@ func (l *Live) serverLines(rank int, ls *liveServer, metric string, scale float6
 		b.WriteString(prefix)
 		b.WriteString(name)
 		b.WriteString("  ")
+		if layout.categoryMarkers {
+			b.WriteString(categoryMarker(c))
+			b.WriteByte(' ')
+		}
 		if layout.showBars {
 			glyph := "▄"
 			if i%2 == 1 {
@@ -741,6 +994,19 @@ func (l *Live) serverLines(rank int, ls *liveServer, metric string, scale float6
 		lines = append(lines, rankCell+TruncatePad(ls.server.DisplayName(), layout.nameWidth))
 	}
 	return lines
+}
+
+func categoryMarker(category model.Category) string {
+	switch category {
+	case model.CatCached:
+		return "C"
+	case model.CatUncached:
+		return "U"
+	case model.CatTLD:
+		return "T"
+	default:
+		return "?"
+	}
 }
 
 func (l *Live) latencyTrack(value, scale float64, width int, glyph string, color func(string) string, valid bool) string {
