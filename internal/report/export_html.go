@@ -394,7 +394,7 @@ func presentHTMLPenaltyKeys(scores []model.Score) []string {
 		}
 	}
 	var keys []string
-	for _, k := range []string{"loss", "servfail", "invalid-response", "retry", "jitter", "nxdomain-interception", "no-dnssec", "no-rebind-protection"} {
+	for _, k := range []string{"loss", "servfail", "invalid-response", "retry", "jitter", "nxdomain-interception", "no-dnssec"} {
 		if present[k] {
 			keys = append(keys, k)
 			delete(present, k)
@@ -432,7 +432,7 @@ func statusDotCell(v model.Verdict, goodWhenYes bool, yesLabel, noLabel string) 
 
 func writeHTMLCharacteristics(b *strings.Builder, res *model.RunResult) {
 	b.WriteString("<section>\n<h2>Server characteristics</h2>\n")
-	b.WriteString("<div class=\"tablewrap\"><table>\n<thead><tr><th>resolver</th><th>protocol</th><th>status</th><th>dnssec validation</th><th>nxdomain honesty</th><th>rebind protection</th></tr></thead>\n<tbody>\n")
+	b.WriteString("<div class=\"tablewrap\"><table>\n<thead><tr><th>resolver</th><th>protocol</th><th>status</th><th>dnssec validation</th><th>nxdomain honesty</th></tr></thead>\n<tbody>\n")
 	for i := range res.Servers {
 		s := &res.Servers[i]
 		state := stateOf(res, s.ID)
@@ -446,14 +446,13 @@ func writeHTMLCharacteristics(b *strings.Builder, res *model.RunResult) {
 			stateCell = "<span class=\"dot bad\"></span>" + esc(state.Label())
 		}
 		p := res.Probes[s.ID]
-		dnssec, nx, rebind := "<span class=\"dot off\"></span>not probed", "<span class=\"dot off\"></span>not probed", "<span class=\"dot off\"></span>not probed"
+		dnssec, nx := "<span class=\"dot off\"></span>not probed", "<span class=\"dot off\"></span>not probed"
 		if p != nil {
 			dnssec = statusDotCell(p.DNSSEC.Validating, true, "validating", "not validating")
 			nx = statusDotCell(p.NXInterception, false, "intercepts", "honest")
-			rebind = statusDotCell(p.Rebind.Overall, true, "protected", "unprotected")
 		}
-		fmt.Fprintf(b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-			esc(s.DisplayName()), esc(s.Protocol.Label()), stateCell, dnssec, nx, rebind)
+		fmt.Fprintf(b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			esc(s.DisplayName()), esc(s.Protocol.Label()), stateCell, dnssec, nx)
 	}
 	b.WriteString("</tbody></table></div>\n</section>\n")
 }

@@ -32,13 +32,13 @@ type selectionFlags struct {
 }
 
 func registerSelectionFlags(cmd *cobra.Command, sel *selectionFlags) {
-	cmd.Flags().BoolVar(&sel.system, "system", false, "include the system-configured DNS servers")
-	cmd.Flags().BoolVar(&sel.builtin, "builtin", false, "include the built-in public DNS servers")
-	cmd.Flags().BoolVar(&sel.user, "user", false, "include the user server list")
-	cmd.Flags().StringSliceVar(&sel.only, "only", nil, "restrict to servers matching these IDs or addresses")
-	cmd.Flags().StringVar(&sel.serversFile, "servers-file", "", "extra server list file to include (.json, .csv or .txt)")
-	cmd.Flags().BoolVar(&sel.noIPv6, "no-ipv6", false, "exclude servers with IPv6 addresses")
-	cmd.Flags().StringSliceVar(&sel.protocols, "protocols", nil, "only include these protocols (udp, tcp, dot, doh)")
+	cmd.Flags().BoolVar(&sel.system, "system", false, "include the system-configured DNS resolvers")
+	cmd.Flags().BoolVar(&sel.builtin, "builtin", false, "include the built-in public DNS resolvers")
+	cmd.Flags().BoolVar(&sel.user, "user", false, "include the user resolver list")
+	cmd.Flags().StringSliceVar(&sel.only, "only", nil, "restrict to resolvers matching these IDs or addresses")
+	cmd.Flags().StringVar(&sel.serversFile, "servers-file", "", "extra resolver list file to include (.json, .csv or .txt)")
+	cmd.Flags().BoolVar(&sel.noIPv6, "no-ipv6", false, "exclude resolvers with IPv6 addresses")
+	cmd.Flags().StringSliceVar(&sel.protocols, "protocols", nil, "only include these protocols (udp, tcp, dot, doh, doh3, doq)")
 }
 
 type selectedServers struct {
@@ -70,7 +70,7 @@ func selectServers(ctx context.Context, sel selectionFlags) (selectedServers, er
 	if includeUser {
 		user, err := serverlist.LoadUser("")
 		if err != nil {
-			return out, fmt.Errorf("could not load the user server list: %w", err)
+			return out, fmt.Errorf("could not load the user resolver list: %w", err)
 		}
 		lists = append(lists, user)
 	}
@@ -133,7 +133,7 @@ func loadServersFile(path string) ([]model.Server, error) {
 			servers[i].Source = model.SourceUser
 		}
 		if err := serverlist.ValidateAndPrepare(&servers[i]); err != nil {
-			return nil, fmt.Errorf("invalid server %q in %s: %w", servers[i].DisplayName(), path, err)
+			return nil, fmt.Errorf("invalid resolver %q in %s: %w", servers[i].DisplayName(), path, err)
 		}
 	}
 	return servers, nil
@@ -166,12 +166,13 @@ func newProbeCmd() *cobra.Command {
 	var timeout time.Duration
 	var concurrency int
 	var jsonPath string
+	base := probe.DefaultConfig()
 	cmd := &cobra.Command{
 		Use:   "probe",
-		Short: "Characterize DNS servers without benchmarking them",
-		Long: `Characterizes each selected DNS server: reachability, EDNS0, DNSSEC
-validation, NXDOMAIN handling and DNS rebinding protection. No latency
-benchmark is run; use "dnsbench run" for the full measurement.`,
+		Short: "Characterize DNS resolvers without benchmarking them",
+		Long: `Characterizes each selected DNS resolver: reachability, EDNS0, DNSSEC
+validation and NXDOMAIN handling. No latency benchmark is run; use
+"dnsbench run" for the full measurement.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -184,7 +185,7 @@ benchmark is run; use "dnsbench run" for the full measurement.`,
 				return err
 			}
 			if len(selection.servers) == 0 {
-				return fmt.Errorf("no servers matched the given selection")
+				return fmt.Errorf("no resolvers matched the given selection")
 			}
 			cfg := probe.DefaultConfig()
 			cfg.Extended = extended
@@ -195,7 +196,7 @@ benchmark is run; use "dnsbench run" for the full measurement.`,
 				cfg.Concurrency = concurrency
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Probing %s...\n\n", countNoun(len(selection.servers), "server"))
+			fmt.Fprintf(out, "Probing %s...\n\n", countNoun(len(selection.servers), "resolver"))
 			results := probe.Run(ctx, selection.servers, cfg)
 			states := make(map[string]model.ServerState, len(results))
 			for id, r := range results {
@@ -220,10 +221,10 @@ benchmark is run; use "dnsbench run" for the full measurement.`,
 	}
 	registerSelectionFlags(cmd, &sel)
 	cmd.Flags().BoolVar(&extended, "extended", false, "run extended checks (DNS64, QNAME minimization, HTTPS records)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "timeout per query")
-	cmd.Flags().IntVar(&concurrency, "concurrency", 8, "how many servers to probe in parallel")
+	cmd.Flags().DurationVar(&timeout, "timeout", base.Timeout, "timeout per query")
+	cmd.Flags().IntVar(&concurrency, "concurrency", base.Concurrency, "how many resolvers to probe in parallel")
 	cmd.Flags().StringVar(&jsonPath, "json", "", "write raw probe results to this JSON file")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show per-check NXDOMAIN and rebinding details")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show per-check NXDOMAIN details")
 	return cmd
 }
 
@@ -250,11 +251,6 @@ func printProbeDetails(out io.Writer, servers []model.Server, results map[string
 				}
 				fmt.Fprintln(out, line)
 			}
-		}
-		fmt.Fprintf(out, "  rebinding protection: v4 %s, v6 %s, overall %s\n",
-			r.Rebind.V4.Label(), r.Rebind.V6.Label(), r.Rebind.Overall.Label())
-		for _, d := range r.Rebind.Details {
-			fmt.Fprintln(out, "    "+d)
 		}
 		if r.Extended != nil {
 			fmt.Fprintf(out, "  extended: DNS64 %s, QNAME minimization %s, HTTPS record %s\n",

@@ -404,13 +404,15 @@ func TestFactoryValidation(t *testing.T) {
 	if _, err := New(model.Server{Protocol: "weird", Address: "127.0.0.1"}, Options{}); err == nil {
 		t.Error("unknown protocol: expected error")
 	}
-	for _, p := range []model.Protocol{model.ProtoUDP, model.ProtoTCP, model.ProtoDoT} {
+	for _, p := range []model.Protocol{model.ProtoUDP, model.ProtoTCP, model.ProtoDoT, model.ProtoDoQ} {
 		if _, err := New(model.Server{Protocol: p}, Options{}); err == nil {
 			t.Errorf("%s without address: expected error", p)
 		}
 	}
-	if _, err := New(model.Server{Protocol: model.ProtoDoH}, Options{}); err == nil {
-		t.Error("doh without URL: expected error")
+	for _, p := range []model.Protocol{model.ProtoDoH, model.ProtoDoH3} {
+		if _, err := New(model.Server{Protocol: p}, Options{}); err == nil {
+			t.Errorf("%s without URL: expected error", p)
+		}
 	}
 	cases := []struct {
 		s    model.Server
@@ -420,6 +422,8 @@ func TestFactoryValidation(t *testing.T) {
 		{model.Server{Protocol: model.ProtoTCP, Address: "127.0.0.1"}, model.ProtoTCP},
 		{model.Server{Protocol: model.ProtoDoT, Address: "127.0.0.1"}, model.ProtoDoT},
 		{model.Server{Protocol: model.ProtoDoH, DoHURL: "https://example.com/dns-query"}, model.ProtoDoH},
+		{model.Server{Protocol: model.ProtoDoH3, DoHURL: "https://example.com/dns-query"}, model.ProtoDoH3},
+		{model.Server{Protocol: model.ProtoDoQ, Address: "127.0.0.1"}, model.ProtoDoQ},
 	}
 	for _, tc := range cases {
 		q, err := New(tc.s, Options{})

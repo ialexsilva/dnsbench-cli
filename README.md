@@ -1,6 +1,6 @@
 # dnsbench
 
-dnsbench is a command-line tool that benchmarks and diagnoses recursive DNS servers **as seen from your own network**. It measures cached, uncached and recursive-path latency, packet loss, retries and stability, and it characterizes each server's behavior: DNSSEC validation, NXDOMAIN handling, DNS rebinding protection and optional modern extensions (DNS64, QNAME minimization, HTTPS records). It ranks every enabled category with equal weight by default, compares aggregate latency costs with a paired bootstrap and explains the results in plain language.
+dnsbench is a command-line tool that benchmarks and diagnoses recursive DNS servers **as seen from your own network**. It measures cached, uncached and recursive-path latency, packet loss, retries and stability, and it characterizes each server's behavior: DNSSEC validation, NXDOMAIN handling and optional modern extensions (DNS64, QNAME minimization, HTTPS records). It ranks every enabled category with equal weight by default, compares aggregate latency costs with a paired bootstrap and explains the results in plain language.
 
 Every number produced by dnsbench is specific to one network, one ISP, one location and one time of day. A server that wins here can lose on another network or at another hour, so treat the ranking as a local snapshot, not a universal truth.
 
@@ -104,7 +104,7 @@ it onto your `PATH`, drop the `./` prefix; on Windows use `.\dnsbench.exe`.
 # Benchmark and open a shareable HTML report in the browser when the run finishes
 ./dnsbench run --builtin --open
 
-# Characterize servers (DNSSEC, NXDOMAIN, rebinding) without benchmarking
+# Characterize servers (DNSSEC and NXDOMAIN) without benchmarking
 ./dnsbench probe --builtin --verbose
 
 # Enable the uncached category with a zone you control
@@ -133,7 +133,33 @@ Keep the network idle during a run: downloads, streaming and calls distort the n
 
 Global flags: `--no-color` disables colored output; `-v, --version` prints the version. Run `dnsbench <command> --help` for the full flag list of each command.
 
-The built-in list ships 55 public resolver endpoints (UDP, DoT and DoH) from operators including Google Public DNS, Cloudflare, Quad9, OpenDNS, AdGuard DNS, CleanBrowsing, Control D, DigiCert UltraDNS, Gcore Public DNS, NextDNS and Comodo Secure DNS. The user list is stored as `servers.json` under your OS user config directory (for example `~/Library/Application Support/dnsbench` on macOS, `~/.config/dnsbench` on Linux, `%AppData%\dnsbench` on Windows).
+The built-in list ships 57 public resolver endpoints (UDP, DoT, DoH, DoH/3 and DoQ) from operators including Google Public DNS, Cloudflare, Quad9, OpenDNS, AdGuard DNS, CleanBrowsing, Control D, Mullvad DNS and NextDNS. The user list is stored as `servers.json` under your OS user config directory (for example `~/Library/Application Support/dnsbench` on macOS, `~/.config/dnsbench` on Linux, `%AppData%\dnsbench` on Windows).
+
+## Transports
+
+dnsbench speaks six transports: plaintext `udp` and `tcp` on port 53, `dot` (DNS over TLS, RFC 7858), `doh` (DNS over HTTPS on HTTP/2, RFC 8484), `doh3` (the same DoH endpoint over HTTP/3) and `doq` (DNS over QUIC, RFC 9250). Select any combination with `--protocols`:
+
+```bash
+# Only encrypted transports
+./dnsbench run --protocols dot,doh,doh3,doq
+
+# Compare just the QUIC-based transports
+./dnsbench run --protocols doh3,doq
+```
+
+This matters if your router intercepts port 53: every plaintext query is then answered by the router rather than by the resolver you meant to measure, and the ranking compares your router against itself.
+
+Selecting encrypted transports does not change how a hostname-only custom endpoint is bootstrapped: the system resolver still has to resolve that hostname before the encrypted connection exists. Every encrypted entry in the built-in list avoids that lookup by pinning the resolver's IP address in the `address` field and dialing it directly, while keeping the hostname for SNI and certificate validation. Add an `address` to a custom entry when you want the same behavior.
+
+In a server-list text file the pin is an `@address` suffix, and the two QUIC transports get their own schemes:
+
+```
+https://dns.google/dns-query@8.8.8.8        # DoH pinned to 8.8.8.8
+h3://dns.quad9.net/dns-query@9.9.9.9        # DoH/3
+quic://dns.adguard-dns.com@94.140.14.14     # DoQ
+```
+
+Because QUIC performs one handshake instead of a TCP connect followed by a TLS handshake, `doh3` and `doq` report that combined handshake as the TLS phase and leave the connect phase at zero in the phase breakdown.
 
 The popular domains used by the cached benchmark are stored in [`internal/model/cached_domains.json`](internal/model/cached_domains.json). Edit the `domains` array to review, add or remove entries, then rebuild `dnsbench`; the JSON is validated and embedded into the executable at compile time.
 
@@ -145,7 +171,7 @@ For a full, shareable report use `--export html`, or `--open`, which writes the 
 
 ## Measurement pacing
 
-dnsbench spaces its query launches with a single global pacer (`--pace`, default 20ms) and reuses one connected socket per server, so a run does not flood the local Wi-Fi link, NAT router or uplink and then misread the resulting drops as server loss. `--pace` is where the run starts, not a bound: the pace adapts in both directions as the run progresses, shortening on clean networks to as little as a quarter of it and, when timeouts appear across several servers at once (the signature of local congestion rather than of any one server), easing off to as much as 8× it and noting the adjustment in the live view. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details.
+During triage and benchmarking, dnsbench spaces query launches globally (`--pace`, default 20ms) and reuses one connected socket per server, so a run does not flood the local Wi-Fi link, NAT router or uplink and then misread the resulting drops as server loss. `--pace` is where the benchmark starts, not a bound: it shortens on clean networks to as little as a quarter of the configured value and, when timeouts appear across several servers at once (the signature of local congestion rather than of any one server), eases off to as much as 8× it and notes the adjustment in the live view. The preceding characterization phase has no launch pacer; its small qualitative workload reuses one persistent session per server and is bounded by `--concurrency`. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details.
 
 While a run is in progress dnsbench also asks the operating system not to enter idle sleep, so leaving the machine unattended (or letting the display turn off) does not suspend the process mid-run and poison the timings. It uses the native mechanism of each platform — `caffeinate` on macOS, a systemd-logind idle inhibitor lock held over D-Bus on Linux, and `SetThreadExecutionState` on Windows.
 
@@ -217,7 +243,7 @@ release archive triggers.
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — package map, data model, full benchmark flow, concurrency strategy, error taxonomy
-- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — what is measured and why: query categories, warmup, triage, DNSSEC, NXDOMAIN, rebinding, statistical significance
+- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — what is measured and why: query categories, warmup, triage, DNSSEC, NXDOMAIN, statistical significance
 - [docs/FORMULAS.md](docs/FORMULAS.md) — every formula with worked numeric examples, plus the complete ranking weight tables
 
 ## License

@@ -81,7 +81,7 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 		return strings.ToLower(servers[i].DisplayName()) < strings.ToLower(servers[j].DisplayName())
 	})
 
-	headers := []string{" ", "resolver", "proto", "status", "dnssec", "nxdomain", "rebind"}
+	headers := []string{" ", "resolver", "proto", "status", "dnssec", "nxdomain"}
 	rows := make([][]string, 0, len(servers))
 	for _, s := range servers {
 		marker := ""
@@ -96,7 +96,6 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 			statusCell(states, s.ID),
 			dnssecCell(p),
 			nxCell(p),
-			rebindCell(p),
 		})
 	}
 	legend := ""
@@ -107,7 +106,7 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 }
 
 func RenderServersTable(servers []model.Server, probes map[string]*model.ProbeResult, states map[string]model.ServerState) string {
-	headers := []string{"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain", "rebind"}
+	headers := []string{"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain"}
 	rows := make([][]string, 0, len(servers))
 	for _, s := range servers {
 		p := probes[s.ID]
@@ -121,7 +120,6 @@ func RenderServersTable(servers []model.Server, probes map[string]*model.ProbeRe
 			statusCell(states, s.ID),
 			dnssecCell(p),
 			nxCell(p),
-			rebindCell(p),
 		})
 	}
 	return renderTable(headers, nil, rows)
@@ -135,7 +133,7 @@ func dashIfEmpty(s string) string {
 }
 
 func scopeCell(s model.Server) string {
-	if s.Protocol == model.ProtoDoH && s.Address == "" {
+	if s.Protocol.UsesURL() && s.Address == "" {
 		return "remote"
 	}
 	return model.ScopeOfString(s.Address).Label()
@@ -206,14 +204,7 @@ func nxCell(p *model.ProbeResult) string {
 	return "?"
 }
 
-func rebindCell(p *model.ProbeResult) string {
-	if p == nil {
-		return "?"
-	}
-	return coloredVerdict(p.Rebind.Overall)
-}
-
-func RenderMetricsTable(res *model.RunResult, category model.Category, sortKey string) string {
+func RenderMetricsTable(res *model.RunResult, category model.Category, sortKey string, terminalWidth ...int) string {
 	key := normalizeSortKey(sortKey)
 	type metricsRow struct {
 		name string
@@ -242,7 +233,7 @@ func RenderMetricsTable(res *model.RunResult, category model.Category, sortKey s
 		return an < bn
 	})
 	headers := []string{
-		"server", "count", "ans", "valid", "tmo", "err", "sf", "trunc", "inv", "loss", "retry%",
+		"resolver", "count", "ans", "valid", "tmo", "err", "sf", "trunc", "inv", "loss", "retry%",
 		"min", "max", "mean", "median", "stddev", "var", "p50", "p90", "p95", "p99",
 		"ci95lo", "ci95hi", "jitter", "sf%", "inv%", "trunc%",
 	}
@@ -265,7 +256,68 @@ func RenderMetricsTable(res *model.RunResult, category model.Category, sortKey s
 			FormatPct(d.ServfailPct), FormatPct(d.InvalidPct), FormatPct(d.TruncatedPct),
 		})
 	}
+	if len(terminalWidth) > 0 && terminalWidth[0] > 0 {
+		headers, rightAlign, cells = fitMetricsTable(headers, rightAlign, cells, terminalWidth[0])
+	}
 	return renderTable(headers, rightAlign, cells)
+}
+
+func fitMetricsTable(headers []string, rightAlign []bool, rows [][]string, width int) ([]string, []bool, [][]string) {
+	const (
+		minNameWidth = 8
+		maxNameWidth = 28
+	)
+	required := []int{0, 1, 9, 14, 19}
+	optional := []int{
+		3, 23, 10, 2, 4, 5, 8, 11, 13, 18, 20,
+		12, 15, 6, 7, 24, 25, 26, 16, 17, 21, 22,
+	}
+	selected := append([]int(nil), required...)
+	for _, index := range optional {
+		candidate := append(append([]int(nil), selected...), index)
+		sort.Ints(candidate)
+		if metricsNameWidth(headers, rows, candidate, width) >= minNameWidth {
+			selected = candidate
+		}
+	}
+	sort.Ints(selected)
+
+	nameWidth := metricsNameWidth(headers, rows, selected, width)
+	nameWidth = max(visibleWidth(headers[0]), min(maxNameWidth, nameWidth))
+
+	fittedHeaders := make([]string, len(selected))
+	fittedAlign := make([]bool, len(selected))
+	fittedRows := make([][]string, len(rows))
+	for column, source := range selected {
+		fittedHeaders[column] = headers[source]
+		fittedAlign[column] = rightAlign[source]
+	}
+	for rowIndex, row := range rows {
+		fittedRows[rowIndex] = make([]string, len(selected))
+		for column, source := range selected {
+			value := row[source]
+			if source == 0 && visibleWidth(value) > nameWidth {
+				value = strings.TrimRight(TruncatePad(value, nameWidth), " ")
+			}
+			fittedRows[rowIndex][column] = value
+		}
+	}
+	return fittedHeaders, fittedAlign, fittedRows
+}
+
+func metricsNameWidth(headers []string, rows [][]string, selected []int, width int) int {
+	fixed := 2 * (len(selected) - 1)
+	for _, source := range selected {
+		if source == 0 {
+			continue
+		}
+		columnWidth := visibleWidth(headers[source])
+		for _, row := range rows {
+			columnWidth = max(columnWidth, visibleWidth(row[source]))
+		}
+		fixed += columnWidth
+	}
+	return width - fixed
 }
 
 func metricValue(d *model.Distribution, key string) float64 {

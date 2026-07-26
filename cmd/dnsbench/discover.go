@@ -17,18 +17,18 @@ import (
 func newDiscoverCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "discover",
-		Short: "Show the DNS servers configured on this system",
+		Short: "Show the DNS resolvers configured on this system",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 			servers, _, warnings, err := sysdns.Discover(ctx)
 			if err != nil {
-				return fmt.Errorf("could not discover system DNS servers: %w", err)
+				return fmt.Errorf("could not discover system DNS resolvers: %w", err)
 			}
 			out := cmd.OutOrStdout()
 			if len(servers) == 0 {
-				fmt.Fprintln(out, "No system DNS servers were found.")
+				fmt.Fprintln(out, "No system DNS resolvers were found.")
 			} else {
 				fmt.Fprint(out, renderDiscoverTable(servers))
 				printForwarderNotes(out, servers)

@@ -103,6 +103,7 @@ func TestRenderRankingList(t *testing.T) {
 		"latency cost in ms, lower is better",
 		"Cloudflare", "Quad9 Secure", "Google Public DNS",
 		"10.1 ms", "18.0 ms",
+		"#", "resolver", "cost", "loss",
 		"● current DNS",
 		"* cost includes penalties",
 		"1 sidelined", "1 unreachable",
@@ -120,14 +121,18 @@ func TestRenderRankingList(t *testing.T) {
 	if strings.Contains(out, "← current DNS") {
 		t.Errorf("ranking rows should no longer append the trailing current-DNS marker\n%s", out)
 	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Google Public DNS") && !strings.HasPrefix(line, "●") {
+			t.Errorf("current DNS row is missing its non-color marker\n%s", out)
+		}
+	}
 	if !strings.Contains(out, "█") {
 		t.Errorf("ranking list has no bars\n%s", out)
 	}
 }
 
 func TestRenderRankingListColorsCurrentDNSName(t *testing.T) {
-	SetColorEnabled(true)
-	t.Cleanup(func() { SetColorEnabled(false) })
+	enableColors(t)
 	out := RenderRankingList(chartFixture(), model.RankLatency, "", "")
 	if !strings.Contains(out, "\x1b[36mGoogle Public DNS") {
 		t.Errorf("current DNS name is not colored cyan\n%q", out)

@@ -32,8 +32,7 @@ func TestBuiltinLoads(t *testing.T) {
 func TestBuiltinCoversExpectedOperators(t *testing.T) {
 	want := []string{
 		"Google Public DNS", "Cloudflare", "Quad9", "OpenDNS", "AdGuard DNS",
-		"CleanBrowsing", "Control D", "DigiCert UltraDNS",
-		"Gcore Public DNS", "NextDNS", "Comodo Secure DNS",
+		"CleanBrowsing", "Control D", "Mullvad DNS", "NextDNS",
 	}
 	seen := make(map[string]bool)
 	for _, s := range Builtin() {
@@ -49,13 +48,35 @@ func TestBuiltinCoversExpectedOperators(t *testing.T) {
 func TestBuiltinExcludesRemovedOperators(t *testing.T) {
 	removed := map[string]bool{
 		"Alibaba Cloud Public DNS": true,
+		"Comodo Secure DNS":        true,
+		"DigiCert UltraDNS":        true,
 		"DNS.SB":                   true,
-		"Mullvad":                  true,
+		"Gcore Public DNS":         true,
 	}
 	for _, s := range Builtin() {
 		if removed[s.Operator] {
 			t.Errorf("removed operator %q is still present (server %q)", s.Operator, s.ID)
 		}
+	}
+}
+
+func TestBuiltinMullvadProtocols(t *testing.T) {
+	got := make(map[model.Protocol]int)
+	for _, s := range Builtin() {
+		if s.Operator == "Mullvad DNS" {
+			got[s.Protocol]++
+		}
+	}
+
+	want := []model.Protocol{model.ProtoDoT, model.ProtoDoH}
+	for _, protocol := range want {
+		if got[protocol] != 1 {
+			t.Errorf("Mullvad %s endpoints = %d, want 1", protocol.Label(), got[protocol])
+		}
+		delete(got, protocol)
+	}
+	for protocol, count := range got {
+		t.Errorf("Mullvad has %d unexpected %s endpoint(s)", count, protocol.Label())
 	}
 }
 
@@ -81,20 +102,34 @@ func TestBuiltinExcludesKnownUnreachableEndpoints(t *testing.T) {
 func TestBuiltinAddressesParse(t *testing.T) {
 	for _, s := range Builtin() {
 		switch s.Protocol {
-		case model.ProtoUDP, model.ProtoTCP, model.ProtoDoT:
+		case model.ProtoUDP, model.ProtoTCP, model.ProtoDoT, model.ProtoDoQ:
 			if _, err := netip.ParseAddr(s.Address); err != nil {
 				t.Errorf("server %q has invalid address %q: %v", s.ID, s.Address, err)
 			}
 		}
-		if s.Protocol == model.ProtoDoT && s.TLSHostname == "" {
-			t.Errorf("DoT server %q has no TLS hostname", s.ID)
+		switch s.Protocol {
+		case model.ProtoDoT, model.ProtoDoQ:
+			if s.TLSHostname == "" {
+				t.Errorf("%s server %q has no TLS hostname", s.Protocol.Label(), s.ID)
+			}
+		}
+	}
+}
+
+func TestBuiltinEncryptedServersArePinned(t *testing.T) {
+	for _, s := range Builtin() {
+		if !s.Protocol.Encrypted() {
+			continue
+		}
+		if !s.BootstrapPinned() {
+			t.Errorf("%s server %q has no pinned bootstrap address", s.Protocol.Label(), s.ID)
 		}
 	}
 }
 
 func TestBuiltinDoHURLsParse(t *testing.T) {
 	for _, s := range Builtin() {
-		if s.Protocol != model.ProtoDoH {
+		if !s.Protocol.UsesURL() {
 			continue
 		}
 		u, err := url.Parse(s.DoHURL)

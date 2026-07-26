@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dnsbench/internal/model"
+	"dnsbench/internal/transport"
 
 	"github.com/miekg/dns"
 )
@@ -18,14 +19,6 @@ func testConfig(uncachedZone string) Config {
 	cfg.SignedDomain = "signed.test"
 	cfg.BogusDomain = "bogus.test"
 	cfg.UnsignedDomain = "unsigned.test"
-	cfg.RebindV4 = []RebindCase{
-		{Host: "127.0.0.1.rebind.test", Expected: "127.0.0.1"},
-		{Host: "192.168.1.1.rebind.test", Expected: "192.168.1.1"},
-	}
-	cfg.RebindV6 = []RebindCase{
-		{Host: "--1.rebind.test", Expected: "::1"},
-		{Host: "fd00--1.rebind.test", Expected: "fd00::1"},
-	}
 	cfg.NXTLDZone = "com"
 	cfg.UncachedZone = uncachedZone
 	cfg.Timeout = 2 * time.Second
@@ -78,24 +71,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.UnsignedDomain != "github.com" {
 		t.Errorf("UnsignedDomain = %q", cfg.UnsignedDomain)
 	}
-	if len(cfg.RebindV4) != 4 {
-		t.Fatalf("len(RebindV4) = %d, want 4", len(cfg.RebindV4))
-	}
-	if cfg.RebindV4[0] != (RebindCase{Host: "127.0.0.1.sslip.io", Expected: "127.0.0.1"}) {
-		t.Errorf("RebindV4[0] = %+v", cfg.RebindV4[0])
-	}
-	if cfg.RebindV4[3] != (RebindCase{Host: "192.168.1.1.sslip.io", Expected: "192.168.1.1"}) {
-		t.Errorf("RebindV4[3] = %+v", cfg.RebindV4[3])
-	}
-	if len(cfg.RebindV6) != 2 {
-		t.Fatalf("len(RebindV6) = %d, want 2", len(cfg.RebindV6))
-	}
-	if cfg.RebindV6[0] != (RebindCase{Host: "--1.sslip.io", Expected: "::1"}) {
-		t.Errorf("RebindV6[0] = %+v", cfg.RebindV6[0])
-	}
-	if cfg.RebindV6[1] != (RebindCase{Host: "fd00--1.sslip.io", Expected: "fd00::1"}) {
-		t.Errorf("RebindV6[1] = %+v", cfg.RebindV6[1])
-	}
 	if cfg.NXTLDZone != "com" {
 		t.Errorf("NXTLDZone = %q", cfg.NXTLDZone)
 	}
@@ -116,6 +91,42 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Factory != nil {
 		t.Error("Factory should default to nil")
+	}
+}
+
+type probeTestQuerier struct {
+	onQuery func()
+}
+
+func (q *probeTestQuerier) Query(context.Context, transport.Question) model.QueryResult {
+	if q.onQuery != nil {
+		q.onQuery()
+	}
+	return model.QueryResult{
+		Rcode:   dns.RcodeSuccess,
+		Answers: []model.RR{{Type: "A", Data: "192.0.2.1"}},
+	}
+}
+
+func (*probeTestQuerier) Protocol() model.Protocol { return model.ProtoUDP }
+func (*probeTestQuerier) Close() error             { return nil }
+
+func TestRunUsesPersistentQuerierForCharacterization(t *testing.T) {
+	cfg := testConfig("")
+	var got transport.Options
+	cfg.Factory = func(_ model.Server, opts transport.Options) (transport.Querier, error) {
+		got = opts
+		return &probeTestQuerier{}, nil
+	}
+	results := Run(context.Background(), []model.Server{{ID: "mock"}}, cfg)
+	if results["mock"] == nil {
+		t.Fatal("missing probe result")
+	}
+	if !got.Persistent {
+		t.Error("probe factory received Persistent = false, want one reused session per server")
+	}
+	if got.Timeout != cfg.Timeout {
+		t.Errorf("probe factory Timeout = %v, want %v", got.Timeout, cfg.Timeout)
 	}
 }
 
@@ -169,12 +180,6 @@ func TestValidatingResolverProfile(t *testing.T) {
 		t.Errorf("www-nonexistent qname = %q", pr.NXChecks[2].QName)
 	}
 	assertVerdict(t, "NXInterception", pr.NXInterception, model.VerdictNo)
-	assertVerdict(t, "Rebind.V4", pr.Rebind.V4, model.VerdictYes)
-	assertVerdict(t, "Rebind.V6", pr.Rebind.V6, model.VerdictNo)
-	assertVerdict(t, "Rebind.Overall", pr.Rebind.Overall, model.VerdictPartial)
-	if len(pr.Rebind.Details) != 4 {
-		t.Errorf("len(Rebind.Details) = %d, want 4", len(pr.Rebind.Details))
-	}
 	if pr.ReverseName != "resolver.test" {
 		t.Errorf("ReverseName = %q, want %q", pr.ReverseName, "resolver.test")
 	}
@@ -230,9 +235,6 @@ func TestInterceptorProfile(t *testing.T) {
 		t.Errorf("controlled-zone qname = %q", byLabel["controlled-zone"].QName)
 	}
 	assertVerdict(t, "NXInterception", pr.NXInterception, model.VerdictYes)
-	assertVerdict(t, "Rebind.V4", pr.Rebind.V4, model.VerdictUnknown)
-	assertVerdict(t, "Rebind.V6", pr.Rebind.V6, model.VerdictUnknown)
-	assertVerdict(t, "Rebind.Overall", pr.Rebind.Overall, model.VerdictUnknown)
 	if pr.ReverseName != "resolver.test" {
 		t.Errorf("ReverseName = %q", pr.ReverseName)
 	}
@@ -242,58 +244,6 @@ func TestInterceptorProfile(t *testing.T) {
 	assertVerdict(t, "Extended.DNS64", pr.Extended.DNS64, model.VerdictNo)
 	assertVerdict(t, "Extended.QNAMEMinimization", pr.Extended.QNAMEMinimization, model.VerdictNo)
 	assertVerdict(t, "Extended.HTTPSRecord", pr.Extended.HTTPSRecord, model.VerdictNo)
-}
-
-func TestRebindBlockingProfile(t *testing.T) {
-	pr := runProbe(t, profileRebindBlocking, testConfig(""))
-	if !pr.Reachable {
-		t.Fatalf("expected reachable, errors: %v", pr.Errors)
-	}
-	assertVerdict(t, "DNSSEC.BogusServfail", pr.DNSSEC.BogusServfail, model.VerdictYes)
-	assertVerdict(t, "DNSSEC.ReturnsRRSIG", pr.DNSSEC.ReturnsRRSIG, model.VerdictNo)
-	assertVerdict(t, "DNSSEC.ADOnSigned", pr.DNSSEC.ADOnSigned, model.VerdictNo)
-	assertVerdict(t, "DNSSEC.Validating", pr.DNSSEC.Validating, model.VerdictPartial)
-	for _, c := range pr.NXChecks {
-		if c.Behavior != model.NXNoErrorEmpty {
-			t.Errorf("check %s behavior = %q, want %q", c.Label, c.Behavior, model.NXNoErrorEmpty)
-		}
-	}
-	assertVerdict(t, "NXInterception", pr.NXInterception, model.VerdictNo)
-	assertVerdict(t, "Rebind.V4", pr.Rebind.V4, model.VerdictYes)
-	assertVerdict(t, "Rebind.V6", pr.Rebind.V6, model.VerdictYes)
-	assertVerdict(t, "Rebind.Overall", pr.Rebind.Overall, model.VerdictYes)
-	for _, d := range pr.Rebind.Details {
-		if !strings.Contains(d, "blocked") {
-			t.Errorf("detail %q should mention blocked", d)
-		}
-	}
-	if pr.Extended != nil {
-		t.Error("extended info should be nil when Extended is false")
-	}
-}
-
-func TestRebindUnprotectedProfile(t *testing.T) {
-	pr := runProbe(t, profileRebindUnprotected, testConfig(""))
-	if !pr.Reachable {
-		t.Fatalf("expected reachable, errors: %v", pr.Errors)
-	}
-	assertVerdict(t, "DNSSEC.BogusServfail", pr.DNSSEC.BogusServfail, model.VerdictUnknown)
-	assertVerdict(t, "DNSSEC.BogusWithCDResolves", pr.DNSSEC.BogusWithCDResolves, model.VerdictNo)
-	assertVerdict(t, "DNSSEC.Validating", pr.DNSSEC.Validating, model.VerdictUnknown)
-	for _, c := range pr.NXChecks {
-		if c.Behavior != model.NXExpected {
-			t.Errorf("check %s behavior = %q, want %q", c.Label, c.Behavior, model.NXExpected)
-		}
-	}
-	assertVerdict(t, "NXInterception", pr.NXInterception, model.VerdictNo)
-	assertVerdict(t, "Rebind.V4", pr.Rebind.V4, model.VerdictNo)
-	assertVerdict(t, "Rebind.V6", pr.Rebind.V6, model.VerdictNo)
-	assertVerdict(t, "Rebind.Overall", pr.Rebind.Overall, model.VerdictNo)
-	for _, d := range pr.Rebind.Details {
-		if !strings.Contains(d, "no rebind protection") {
-			t.Errorf("detail %q should mention missing protection", d)
-		}
-	}
 }
 
 func TestUnreachableServer(t *testing.T) {
@@ -325,7 +275,6 @@ func TestUnreachableServer(t *testing.T) {
 	assertVerdict(t, "EDNS0", pr.EDNS0, model.VerdictUnknown)
 	assertVerdict(t, "DNSSEC.Validating", pr.DNSSEC.Validating, model.VerdictUnknown)
 	assertVerdict(t, "NXInterception", pr.NXInterception, model.VerdictUnknown)
-	assertVerdict(t, "Rebind.Overall", pr.Rebind.Overall, model.VerdictUnknown)
 	if len(pr.NXChecks) != 0 {
 		t.Errorf("len(NXChecks) = %d, want 0", len(pr.NXChecks))
 	}

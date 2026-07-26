@@ -1,6 +1,9 @@
 # Build artifacts
 /releases/
 
+# Logs
+*.log
+
 # Generated benchmark reports
 /dnsbench-*.html
 /reports/

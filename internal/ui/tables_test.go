@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,14 +21,12 @@ func TestRenderServersTable(t *testing.T) {
 			Reachable:      true,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictYes},
 			NXInterception: model.VerdictNo,
-			Rebind:         model.RebindInfo{Overall: model.VerdictYes},
 		},
 		"router": {
 			ServerID:       "router",
 			Reachable:      true,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictNo},
 			NXInterception: model.VerdictYes,
-			Rebind:         model.RebindInfo{Overall: model.VerdictNo},
 		},
 	}
 	states := map[string]model.ServerState{
@@ -37,7 +36,7 @@ func TestRenderServersTable(t *testing.T) {
 	}
 	out := RenderServersTable(servers, probes, states)
 	for _, want := range []string{
-		"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain", "rebind",
+		"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain",
 		"1.1.1.1:53", "192.168.1.1:53", "https://dns.mullvad.net/dns-query",
 		"Cloudflare Inc",
 		"UDP/53", "DoH",
@@ -58,7 +57,7 @@ func TestRenderServerCharacteristicsCompact(t *testing.T) {
 	out := RenderServerCharacteristics(chartFixture())
 	for _, want := range []string{
 		"● current DNS resolver",
-		"resolver", "proto", "status", "dnssec", "nxdomain", "rebind",
+		"resolver", "proto", "status", "dnssec", "nxdomain",
 		"Google Public DNS", "Cloudflare", "Quad9 Secure",
 		"active", "sidelined", "unreachable",
 	} {
@@ -107,12 +106,38 @@ func TestRenderMetricsTableCells(t *testing.T) {
 	disableColors(t)
 	out := RenderMetricsTable(chartFixture(), model.CatCached, "median")
 	for _, want := range []string{
-		"server", "count", "ans", "loss", "min", "max", "mean", "median",
+		"resolver", "count", "ans", "loss", "min", "max", "mean", "median",
 		"stddev", "var", "p50", "p90", "p95", "p99", "ci95lo", "ci95hi", "jitter",
 		"8.0 ms", "12.0 ms", "2.0%", "100",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("metrics table missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderMetricsTableFitsTerminalWidth(t *testing.T) {
+	disableColors(t)
+	for _, width := range []int{50, 60, 80, 120, 160} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			out := RenderMetricsTable(chartFixture(), model.CatCached, "median", width)
+			for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+				if got := visibleWidth(line); got > width {
+					t.Fatalf("responsive metrics line width = %d, want <= %d:\n%s", got, width, out)
+				}
+			}
+			for _, want := range []string{"resolver", "count", "loss", "median", "p95"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("responsive metrics table is missing essential column %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+
+	out := RenderMetricsTable(chartFixture(), model.CatCached, "median", 80)
+	for _, unwanted := range []string{"stddev", "ci95lo", "ci95hi"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("responsive metrics table retained low-priority column %q:\n%s", unwanted, out)
 		}
 	}
 }

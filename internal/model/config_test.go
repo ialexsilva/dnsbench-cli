@@ -3,12 +3,20 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultBenchConfigUsesPersistentSession(t *testing.T) {
 	cfg := DefaultBenchConfig(ModeStandard)
 	if cfg.Session != SessionPersistent {
 		t.Fatalf("Session = %q, want %q", cfg.Session, SessionPersistent)
+	}
+}
+
+func TestDefaultBenchConfigUses200MillisecondTriageThreshold(t *testing.T) {
+	cfg := DefaultBenchConfig(ModeStandard)
+	if cfg.TriageThreshold != 200*time.Millisecond {
+		t.Fatalf("TriageThreshold = %s, want 200ms", cfg.TriageThreshold)
 	}
 }
 

@@ -131,7 +131,7 @@ func TestTriageClassification(t *testing.T) {
 	cfg.TriageThreshold = 50 * time.Millisecond
 	cfg.WarmupRounds = 0
 	cfg.Rounds = 1
-	e := NewEngine(testServers("fast", "slow", "silent", "refused"), cfg, f.factory)
+	e := NewEngine(builtinTestServers("fast", "slow", "silent", "refused"), cfg, f.factory)
 	events, err := runEngine(t, e, context.Background())
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
@@ -191,7 +191,7 @@ func TestTriageForceAllKeepsSlowActive(t *testing.T) {
 	cfg.ForceAll = true
 	cfg.WarmupRounds = 0
 	cfg.Rounds = 1
-	e := NewEngine(testServers("fast", "slow", "silent"), cfg, f.factory)
+	e := NewEngine(builtinTestServers("fast", "slow", "silent"), cfg, f.factory)
 	if _, err := runEngine(t, e, context.Background()); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
@@ -208,6 +208,64 @@ func TestTriageForceAllKeepsSlowActive(t *testing.T) {
 	}
 	if !seen["fast"] || !seen["slow"] || seen["silent"] {
 		t.Fatalf("sampled servers = %v", seen)
+	}
+}
+
+func TestTriageThresholdAppliesOnlyToBuiltins(t *testing.T) {
+	f := newFakeFactory()
+	for id, rtt := range map[string]time.Duration{
+		"builtin-at-limit":   200 * time.Millisecond,
+		"builtin-over-limit": 201 * time.Millisecond,
+		"custom-slow":        250 * time.Millisecond,
+	} {
+		f.script(id, staticResult(okResult(rtt)))
+	}
+	f.script("custom-recovers", func(_ context.Context, n int, _ transport.Question) model.QueryResult {
+		if n == 0 {
+			return timeoutResult()
+		}
+		return okResult(300 * time.Millisecond)
+	})
+	f.script("custom-offline", staticResult(timeoutResult()))
+	servers := builtinTestServers("builtin-at-limit", "builtin-over-limit")
+	servers = append(servers, testServers("custom-slow", "custom-recovers", "custom-offline")...)
+	cfg := testConfig()
+	cfg.TriageEnabled = true
+	cfg.TriageAttempts = 3
+	cfg.TriageThreshold = 200 * time.Millisecond
+	cfg.WarmupRounds = 0
+	cfg.Rounds = 1
+	cfg.Categories = []model.Category{model.CatCached}
+	e := NewEngine(servers, cfg, f.factory)
+	if _, err := runEngine(t, e, context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	samples, triage, states, _ := e.Result()
+	if tr := triage["builtin-at-limit"]; tr.State != model.StateActive || tr.Attempts != 1 {
+		t.Errorf("builtin at limit = %+v, want active after one attempt", tr)
+	}
+	if tr := triage["builtin-over-limit"]; tr.State != model.StateBenched || tr.Attempts != cfg.TriageAttempts {
+		t.Errorf("builtin over limit = %+v, want benched after %d attempts", tr, cfg.TriageAttempts)
+	}
+	if tr := triage["custom-slow"]; tr.State != model.StateActive || tr.Attempts != 1 {
+		t.Errorf("custom slow = %+v, want active after one valid answer", tr)
+	}
+	if tr := triage["custom-recovers"]; tr.State != model.StateActive || tr.Attempts != 2 || tr.Responses != 1 {
+		t.Errorf("custom recovered = %+v, want active after its first valid answer", tr)
+	}
+	if tr := triage["custom-offline"]; tr.State != model.StateOffline || tr.Attempts != cfg.TriageAttempts || tr.Responses != 0 {
+		t.Errorf("custom offline = %+v, want offline after every attempt failed", tr)
+	}
+	if states["custom-slow"] != model.StateActive || states["custom-recovers"] != model.StateActive {
+		t.Errorf("custom states = slow:%s recovered:%s, want active", states["custom-slow"], states["custom-recovers"])
+	}
+	seen := map[string]bool{}
+	for _, sample := range samples {
+		seen[sample.ServerID] = true
+	}
+	if !seen["builtin-at-limit"] || !seen["custom-slow"] || !seen["custom-recovers"] ||
+		seen["builtin-over-limit"] || seen["custom-offline"] {
+		t.Fatalf("sampled resolvers = %v", seen)
 	}
 }
 

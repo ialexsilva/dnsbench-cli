@@ -46,7 +46,7 @@ func Run(ctx context.Context, servers []model.Server, cfg Config) map[string]*mo
 
 func probeServer(ctx context.Context, srv model.Server, cfg Config, factory transport.Factory) *model.ProbeResult {
 	res := newResult(srv.ID)
-	querier, err := factory(srv, transport.Options{Timeout: cfg.Timeout})
+	querier, err := factory(srv, transport.Options{Timeout: cfg.Timeout, Persistent: true})
 	if err != nil {
 		res.Errors = append(res.Errors, "could not set up transport: "+err.Error())
 		return res
@@ -72,11 +72,6 @@ func newResult(serverID string) *model.ProbeResult {
 			Validating:          model.VerdictUnknown,
 		},
 		NXInterception: model.VerdictUnknown,
-		Rebind: model.RebindInfo{
-			V4:      model.VerdictUnknown,
-			V6:      model.VerdictUnknown,
-			Overall: model.VerdictUnknown,
-		},
 	}
 }
 
@@ -101,10 +96,6 @@ func (p *prober) run(ctx context.Context) {
 		return
 	}
 	p.checkNXDomain(ctx)
-	if p.canceled(ctx) {
-		return
-	}
-	p.checkRebind(ctx)
 	if p.canceled(ctx) {
 		return
 	}

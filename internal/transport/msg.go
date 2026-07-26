@@ -19,9 +19,10 @@ import (
 
 const defaultEDNSBufSize = 1232
 
-func buildMsg(q Question, doh bool) *dns.Msg {
+// DoH prefers zero IDs for cacheability; DoQ requires them (RFC 9250 §4.2.1).
+func buildMsg(q Question, zeroID bool) *dns.Msg {
 	m := new(dns.Msg)
-	if !doh {
+	if !zeroID {
 		m.Id = dns.Id()
 	}
 	m.RecursionDesired = true
@@ -123,18 +124,27 @@ func exchangeUDPDraining(c net.Conn, m *dns.Msg) (*dns.Msg, int, error) {
 }
 
 func exchangeStream(c net.Conn, m *dns.Msg) (*dns.Msg, int, error) {
+	if err := writeFramed(c, m); err != nil {
+		return nil, 0, err
+	}
+	return readFramed(c)
+}
+
+func writeFramed(w io.Writer, m *dns.Msg) error {
 	out, err := m.Pack()
 	if err != nil {
-		return nil, 0, malformedQueryErr(err)
+		return malformedQueryErr(err)
 	}
 	framed := make([]byte, 2+len(out))
 	binary.BigEndian.PutUint16(framed, uint16(len(out)))
 	copy(framed[2:], out)
-	if _, err := c.Write(framed); err != nil {
-		return nil, 0, err
-	}
+	_, err = w.Write(framed)
+	return err
+}
+
+func readFramed(r io.Reader) (*dns.Msg, int, error) {
 	var lenBuf [2]byte
-	if _, err := io.ReadFull(c, lenBuf[:]); err != nil {
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 		return nil, 0, err
 	}
 	n := int(binary.BigEndian.Uint16(lenBuf[:]))
@@ -142,7 +152,7 @@ func exchangeStream(c net.Conn, m *dns.Msg) (*dns.Msg, int, error) {
 		return nil, 0, &model.QueryError{Kind: model.ErrProtocol, Msg: "server sent an empty DNS message"}
 	}
 	body := make([]byte, n)
-	if _, err := io.ReadFull(c, body); err != nil {
+	if _, err := io.ReadFull(r, body); err != nil {
 		return nil, 0, err
 	}
 	resp := new(dns.Msg)

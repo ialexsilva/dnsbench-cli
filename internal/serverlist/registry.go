@@ -71,17 +71,22 @@ func containsFold(list []string, v string) bool {
 
 func ValidateAndPrepare(s *model.Server) error {
 	switch s.Protocol {
-	case model.ProtoUDP, model.ProtoTCP, model.ProtoDoT:
+	case model.ProtoUDP, model.ProtoTCP, model.ProtoDoT, model.ProtoDoQ:
 		if _, err := netip.ParseAddr(s.Address); err != nil {
 			return fmt.Errorf("%s server requires a valid IP address, got %q", s.Protocol.Label(), s.Address)
 		}
-	case model.ProtoDoH:
+	case model.ProtoDoH, model.ProtoDoH3:
 		u, err := url.Parse(s.DoHURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("DoH server requires a valid https URL, got %q", s.DoHURL)
+			return fmt.Errorf("%s server requires a valid https URL, got %q", s.Protocol.Label(), s.DoHURL)
+		}
+		if s.Address != "" {
+			if _, err := netip.ParseAddr(s.Address); err != nil {
+				return fmt.Errorf("%s server bootstrap address must be an IP, got %q", s.Protocol.Label(), s.Address)
+			}
 		}
 	default:
-		return fmt.Errorf("unknown protocol %q (expected udp, tcp, dot or doh)", string(s.Protocol))
+		return fmt.Errorf("unknown protocol %q (expected udp, tcp, dot, doh, doh3 or doq)", string(s.Protocol))
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		return fmt.Errorf("port %d is out of range 0-65535", s.Port)
@@ -96,7 +101,7 @@ func ValidateAndPrepare(s *model.Server) error {
 func generateID(s model.Server) string {
 	base := s.Name
 	if base == "" {
-		if s.Protocol == model.ProtoDoH {
+		if s.Protocol.UsesURL() {
 			base = strings.TrimPrefix(s.DoHURL, "https://")
 		} else {
 			base = s.Address

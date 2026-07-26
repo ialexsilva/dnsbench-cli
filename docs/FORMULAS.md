@@ -135,8 +135,6 @@ retry                 = PenaltyPerRetryPctMs     · (retried    / totalQueries �
 jitter                = JitterWeight · ( Σ_{c∈C} jitter_c / |C| )
 nxdomain-interception = PenaltyNXInterceptionMs        if NX interception verdict = yes
 no-dnssec             = PenaltyNoDNSSECMs              if DNSSEC validating verdict ≠ yes
-no-rebind-protection  = PenaltyNoRebindMs              if rebind overall = no
-                      = PenaltyNoRebindMs / 2          if rebind overall = partial
 ```
 
 ```
@@ -155,18 +153,17 @@ Servers are sorted by ascending total; totals within **0.01 ms** of the previous
 | `PenaltyPerRetryPctMs` | ms added per percentage point of queries that required more than one attempt |
 | `PenaltyNXInterceptionMs` | flat ms, applied once |
 | `PenaltyNoDNSSECMs` | flat ms, applied once |
-| `PenaltyNoRebindMs` | flat ms, applied once (halved for partial protection) |
 | `JitterWeight` | dimensionless multiplier on the mean per-category jitter (ms → ms) |
 
 ## Default weight tables (from `internal/rank/presets.go`)
 
-| Mode | cached | uncached | tld | Metric | Loss | SERVFAIL | Invalid | Retry | NX interception | No DNSSEC | No rebind | Jitter |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `latency` (default) | 1/3 | 1/3 | 1/3 | median | 5 | 5 | 5 | 2 | 5 | 5 | 5 | 0.25 |
-| `browsing` | 0.30 | 0.45 | 0.25 | median | 10 | 10 | 10 | 5 | 15 | 10 | 10 | 0.5 |
-| `reliability` | 1/3 | 1/3 | 1/3 | p95 | 25 | 25 | 25 | 10 | 25 | 20 | 20 | 1.0 |
+| Mode | cached | uncached | tld | Metric | Loss | SERVFAIL | Invalid | Retry | NX interception | No DNSSEC | Jitter |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `latency` (default) | 1/3 | 1/3 | 1/3 | median | 5 | 5 | 5 | 2 | 5 | 5 | 0.25 |
+| `browsing` | 0.30 | 0.45 | 0.25 | median | 10 | 10 | 10 | 5 | 15 | 10 | 0.5 |
+| `reliability` | 1/3 | 1/3 | 1/3 | p95 | 25 | 25 | 25 | 10 | 25 | 20 | 1.0 |
 
-The Loss, SERVFAIL, Invalid and Retry columns are milliseconds per percentage point; the next three are flat milliseconds; Jitter is dimensionless.
+The Loss, SERVFAIL, Invalid and Retry columns are milliseconds per percentage point; the next two are flat milliseconds; Jitter is dimensionless.
 
 Custom weights can be merged over these presets per mode with `--weights <file.json>`.
 
