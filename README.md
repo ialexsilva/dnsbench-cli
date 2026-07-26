@@ -8,76 +8,112 @@ Every number produced by dnsbench is specific to one network, one ISP, one locat
 
 ![dnsbench live benchmark ranking recursive DNS servers by cached and recursive latency](docs/images/dnsbench.png)
 
-## Requirements and build
+## Install
 
-- Go 1.26 or newer (see `go.mod`)
-- No external services or accounts; the tool is fully self-contained
+Download one file, unpack it, run it. There is nothing to install, no runtime to
+set up, no account to create, and no administrator rights are needed — dnsbench
+is a single self-contained executable that only sends DNS queries. Grab the
+latest build from the [releases page](https://github.com/ialexsilva/dnsbench-cli/releases/latest)
+or use the commands below.
 
-```sh
-make build
-```
+### macOS
 
-This produces a binary under `releases/<goos>/<goarch>/`, for example
-`releases/darwin/arm64/dnsbench`. Cross-compilation uses the same command with
-explicit target values:
-
-```sh
-make build GOOS=linux GOARCH=amd64
-```
-
-Windows builds receive the `.exe` extension automatically. To run without
-building:
+Apple Silicon (M1 and later) and Intel Macs need different files. If you are not
+sure which you have, run `uname -m`: `arm64` means Apple Silicon, `x86_64` means
+Intel.
 
 ```sh
-go run ./cmd/dnsbench --help
+# Apple Silicon
+curl -fsSL https://github.com/ialexsilva/dnsbench-cli/releases/latest/download/dnsbench-darwin-arm64.tar.gz | tar -xz
+
+# Intel
+curl -fsSL https://github.com/ialexsilva/dnsbench-cli/releases/latest/download/dnsbench-darwin-amd64.tar.gz | tar -xz
+
+./dnsbench run
 ```
 
-### macOS: allowing the binary to run
-
-Prebuilt release binaries are not signed with an Apple Developer ID, so on the
-first run macOS Gatekeeper may report that it "cannot verify dnsbench is free of
-malware". This is expected for unsigned command-line tools; clear the quarantine
-attribute once and the binary runs normally:
+**If you downloaded the archive with your browser instead**, macOS will refuse to
+run the binary and report that it "cannot verify dnsbench is free of malware".
+That happens because browsers attach a quarantine flag to downloads and these
+release builds are not notarized with an Apple Developer ID. Clear the flag once
+and it runs normally:
 
 ```sh
-xattr -dr com.apple.quarantine ./dnsbench
+xattr -dr com.apple.quarantine dnsbench
 ```
 
-Binaries produced locally with `make build` on macOS are ad-hoc signed
-automatically and do not trigger this warning.
+Files fetched with `curl`, as above, are never quarantined, so that step is only
+needed for browser downloads. The message is expected for any un-notarized
+command-line tool and says nothing about this one in particular.
+
+### Linux (x86-64)
+
+```sh
+curl -fsSL https://github.com/ialexsilva/dnsbench-cli/releases/latest/download/dnsbench-linux-amd64.tar.gz | tar -xz
+./dnsbench run
+```
+
+There is no prebuilt ARM64 Linux binary yet, so on a Raspberry Pi or an ARM
+server you need to [build from source](#build-from-source).
+
+### Windows
+
+In PowerShell:
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/ialexsilva/dnsbench-cli/releases/latest/download/dnsbench-windows-amd64.zip -OutFile dnsbench.zip
+Expand-Archive dnsbench.zip -DestinationPath .
+.\dnsbench.exe run
+```
+
+### Optional: run it from anywhere
+
+The steps above leave the executable in the current folder, which is enough for a
+one-off benchmark. To call `dnsbench` from any directory, move it onto your
+`PATH`:
+
+```sh
+sudo mv dnsbench /usr/local/bin/     # macOS and Linux
+```
+
+Check that it worked with `dnsbench --version`.
 
 ## Quick start
 
-```sh
-# Path produced by make build on the current Unix-like system
-DNSBENCH_BIN="./releases/$(go env GOOS)/$(go env GOARCH)/dnsbench"
+The examples below assume the executable is in the current folder. If you moved
+it onto your `PATH`, drop the `./` prefix; on Windows use `.\dnsbench.exe`.
 
+```sh
 # Learn what the tool measures and how to read the results
-"$DNSBENCH_BIN" intro
+./dnsbench intro
 
 # Show the DNS servers configured on this system
-"$DNSBENCH_BIN" discover
+./dnsbench discover
 
 # Full benchmark with defaults: system + built-in + user servers,
 # standard mode (250 rounds), cached and recursive/TLD categories,
 # persistent sessions and equal category weights
-"$DNSBENCH_BIN" run
+./dnsbench run
 
 # Quick benchmark of the built-in public resolvers, IPv4 only
-"$DNSBENCH_BIN" run --mode quick --builtin --no-ipv6
+./dnsbench run --mode quick --builtin --no-ipv6
 
 # Benchmark two specific servers, show the detailed table and export reports
-"$DNSBENCH_BIN" run --only 1.1.1.1,9.9.9.9 --details --export json,txt --out reports
+./dnsbench run --only 1.1.1.1,9.9.9.9 --details --export json,txt --out reports
 
 # Benchmark and open a shareable HTML report in the browser when the run finishes
-"$DNSBENCH_BIN" run --builtin --open
+./dnsbench run --builtin --open
 
 # Characterize servers (DNSSEC, NXDOMAIN, rebinding) without benchmarking
-"$DNSBENCH_BIN" probe --builtin --verbose
+./dnsbench probe --builtin --verbose
 
 # Enable the uncached category with a zone you control
-"$DNSBENCH_BIN" run --uncached-zone bench.example.com
+./dnsbench run --uncached-zone bench.example.com
 ```
+
+A default `run` takes several minutes: it is 250 measured rounds against every
+selected resolver, deliberately paced so the benchmark does not congest your own
+network. Use `--mode quick` for a faster, rougher answer.
 
 Keep the network idle during a run: downloads, streaming and calls distort the numbers.
 
@@ -145,6 +181,38 @@ These constraints remain documented for interpreting the measurements, but the C
 7. EDNS Client Subnet can influence responses of geo-distributed services.
 8. Malware, ad or content filtering can deliberately modify responses.
 9. DoH and DoT protect transport to the resolver but do not by themselves prove the operator's privacy policy.
+
+## Build from source
+
+Only needed to contribute, to target a platform without a prebuilt binary, or to
+change the embedded domain list. Everyone else should use the
+[install instructions](#install) instead.
+
+Requirements: Go 1.26 or newer (see `go.mod`). There are no other dependencies —
+no external services, no accounts.
+
+```sh
+make build
+```
+
+That produces a binary under `releases/<goos>/<goarch>/`, for example
+`releases/darwin/arm64/dnsbench`. Cross-compilation uses the same command with
+explicit target values, and Windows builds get the `.exe` extension
+automatically:
+
+```sh
+make build GOOS=linux GOARCH=arm64
+```
+
+To run without building a binary:
+
+```sh
+go run ./cmd/dnsbench --help
+```
+
+On macOS the Makefile ad-hoc signs the result, and a locally built file is never
+quarantined, so it runs without the Gatekeeper prompt that a browser-downloaded
+release archive triggers.
 
 ## Documentation
 
