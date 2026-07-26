@@ -159,6 +159,13 @@ func TestTextRoundtrip(t *testing.T) {
 		{Protocol: model.ProtoDoH, DoHURL: "https://dns.example.com/dns-query", Enabled: true},
 		{Protocol: model.ProtoUDP, Address: "1.1.1.1", Name: "Cloudflare Primary", Operator: "Cloudflare", Enabled: true},
 		{Protocol: model.ProtoDoH, DoHURL: "https://dns.google/dns-query", Name: "Google DoH", Operator: "Google Public DNS", Enabled: true},
+		{Protocol: model.ProtoDoH, DoHURL: "https://dns.google/dns-query", Address: "8.8.8.8", Enabled: true},
+		{Protocol: model.ProtoDoH, DoHURL: "https://dns.example.com/dns-query", Address: "192.0.2.1", Port: 8443, Enabled: true},
+		{Protocol: model.ProtoDoH, DoHURL: "https://dns.example.com/dns-query", Address: "2620:fe::fe", Enabled: true},
+		{Protocol: model.ProtoDoH3, DoHURL: "https://dns.quad9.net/dns-query", Address: "9.9.9.9", Enabled: true},
+		{Protocol: model.ProtoDoH3, DoHURL: "https://dns.example.com/dns-query", Name: "Example DoH3", Enabled: true},
+		{Protocol: model.ProtoDoQ, Address: "94.140.14.14", TLSHostname: "dns.adguard-dns.com", Enabled: true},
+		{Protocol: model.ProtoDoQ, Address: "2620:fe::fe", Port: 8853, TLSHostname: "dns.quad9.net", Enabled: true},
 	}
 	data, err := EncodeText(servers)
 	if err != nil {
@@ -217,6 +224,36 @@ func TestDecodeTextGrammar(t *testing.T) {
 	}
 }
 
+func TestDecodeTextEncryptedGrammar(t *testing.T) {
+	input := "h3://dns.quad9.net/dns-query | Quad9 DoH3 | Quad9\n" +
+		"https://dns.google/dns-query@8.8.8.8\n" +
+		"quic://dns.adguard-dns.com@94.140.14.14 | AdGuard DoQ\n" +
+		"https://user@dns.example.com/dns-query\n"
+	servers, err := DecodeText([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(servers) != 4 {
+		t.Fatalf("got %d servers, want 4: %+v", len(servers), servers)
+	}
+	h3 := servers[0]
+	if h3.Protocol != model.ProtoDoH3 || h3.DoHURL != "https://dns.quad9.net/dns-query" || h3.Operator != "Quad9" {
+		t.Errorf("h3:// entry parsed as %+v", h3)
+	}
+	pinned := servers[1]
+	if pinned.Protocol != model.ProtoDoH || pinned.DoHURL != "https://dns.google/dns-query" || pinned.Address != "8.8.8.8" {
+		t.Errorf("pinned DoH entry parsed as %+v", pinned)
+	}
+	doq := servers[2]
+	if doq.Protocol != model.ProtoDoQ || doq.TLSHostname != "dns.adguard-dns.com" || doq.Address != "94.140.14.14" {
+		t.Errorf("quic:// entry parsed as %+v", doq)
+	}
+	userinfo := servers[3]
+	if userinfo.DoHURL != "https://user@dns.example.com/dns-query" || userinfo.Address != "" {
+		t.Errorf("URL with userinfo parsed as %+v", userinfo)
+	}
+}
+
 func TestDecodeTextErrors(t *testing.T) {
 	cases := []string{
 		"banana",
@@ -228,6 +265,11 @@ func TestDecodeTextErrors(t *testing.T) {
 		"tls://dns.example.com@",
 		"tls://dns.example.com@not-an-ip",
 		"https://",
+		"h3://",
+		"quic://@9.9.9.9",
+		"quic://dns.example.com@",
+		"quic://dns.example.com@not-an-ip",
+		"https://@8.8.8.8",
 	}
 	for _, line := range cases {
 		if _, err := DecodeText([]byte(line + "\n")); err == nil {

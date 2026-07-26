@@ -161,16 +161,26 @@ func EncodeText(servers []model.Server) ([]byte, error) {
 func encodeTextLine(s model.Server) (string, error) {
 	var endpoint string
 	switch s.Protocol {
-	case model.ProtoDoH:
+	case model.ProtoDoH, model.ProtoDoH3:
 		if s.DoHURL == "" {
-			return "", fmt.Errorf("cannot encode DoH server %q as text: missing URL", s.DisplayName())
+			return "", fmt.Errorf("cannot encode %s server %q as text: missing URL", s.Protocol.Label(), s.DisplayName())
 		}
 		endpoint = s.DoHURL
-	case model.ProtoDoT:
-		if s.TLSHostname == "" {
-			return "", fmt.Errorf("cannot encode DoT server %q as text: missing TLS hostname", s.DisplayName())
+		if s.Protocol == model.ProtoDoH3 {
+			endpoint = "h3://" + strings.TrimPrefix(endpoint, "https://")
 		}
-		endpoint = "tls://" + s.TLSHostname + "@" + formatTextAddr(s.Address, s.Port, s.Protocol)
+		if s.Address != "" {
+			endpoint += "@" + formatTextAddr(s.Address, s.Port, s.Protocol)
+		}
+	case model.ProtoDoT, model.ProtoDoQ:
+		if s.TLSHostname == "" {
+			return "", fmt.Errorf("cannot encode %s server %q as text: missing TLS hostname", s.Protocol.Label(), s.DisplayName())
+		}
+		scheme := "tls://"
+		if s.Protocol == model.ProtoDoQ {
+			scheme = "quic://"
+		}
+		endpoint = scheme + s.TLSHostname + "@" + formatTextAddr(s.Address, s.Port, s.Protocol)
 	case model.ProtoUDP:
 		endpoint = formatTextAddr(s.Address, s.Port, s.Protocol)
 	default:
@@ -235,23 +245,37 @@ func parseTextLine(line string) (model.Server, error) {
 
 func parseTextEndpoint(endpoint string) (model.Server, error) {
 	switch {
-	case strings.HasPrefix(endpoint, "https://"):
-		u, err := url.Parse(endpoint)
-		if err != nil || u.Host == "" {
-			return model.Server{}, fmt.Errorf("invalid DoH URL %q", endpoint)
+	case strings.HasPrefix(endpoint, "https://"), strings.HasPrefix(endpoint, "h3://"):
+		proto := model.ProtoDoH
+		rawURL := endpoint
+		if strings.HasPrefix(endpoint, "h3://") {
+			proto = model.ProtoDoH3
+			rawURL = "https://" + strings.TrimPrefix(endpoint, "h3://")
 		}
-		return model.Server{Protocol: model.ProtoDoH, DoHURL: endpoint}, nil
-	case strings.HasPrefix(endpoint, "tls://"):
-		rest := strings.TrimPrefix(endpoint, "tls://")
+		rawURL, addr, port, err := splitBootstrap(rawURL)
+		if err != nil {
+			return model.Server{}, err
+		}
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Host == "" {
+			return model.Server{}, fmt.Errorf("invalid %s URL %q", proto.Label(), endpoint)
+		}
+		return model.Server{Protocol: proto, DoHURL: rawURL, Address: addr, Port: port}, nil
+	case strings.HasPrefix(endpoint, "tls://"), strings.HasPrefix(endpoint, "quic://"):
+		proto, scheme := model.ProtoDoT, "tls://"
+		if strings.HasPrefix(endpoint, "quic://") {
+			proto, scheme = model.ProtoDoQ, "quic://"
+		}
+		rest := strings.TrimPrefix(endpoint, scheme)
 		hostname, addrPart, found := strings.Cut(rest, "@")
 		if !found || hostname == "" || addrPart == "" {
-			return model.Server{}, fmt.Errorf("invalid DoT entry %q: expected tls://hostname@address", endpoint)
+			return model.Server{}, fmt.Errorf("invalid %s entry %q: expected %shostname@address", proto.Label(), endpoint, scheme)
 		}
 		addr, port, err := parseTextAddr(addrPart)
 		if err != nil {
 			return model.Server{}, err
 		}
-		return model.Server{Protocol: model.ProtoDoT, Address: addr, Port: port, TLSHostname: hostname}, nil
+		return model.Server{Protocol: proto, Address: addr, Port: port, TLSHostname: hostname}, nil
 	default:
 		addr, port, err := parseTextAddr(endpoint)
 		if err != nil {
@@ -259,6 +283,23 @@ func parseTextEndpoint(endpoint string) (model.Server, error) {
 		}
 		return model.Server{Protocol: model.ProtoUDP, Address: addr, Port: port}, nil
 	}
+}
+
+// splitBootstrap preserves URL userinfo unless the final @ suffix is an IP address.
+func splitBootstrap(rawURL string) (string, string, int, error) {
+	idx := strings.LastIndex(rawURL, "@")
+	if idx < 0 {
+		return rawURL, "", 0, nil
+	}
+	head, tail := rawURL[:idx], rawURL[idx+1:]
+	addr, port, err := parseTextAddr(tail)
+	if err != nil {
+		return rawURL, "", 0, nil
+	}
+	if head == "" {
+		return "", "", 0, fmt.Errorf("invalid entry %q: missing URL before the bootstrap address", rawURL)
+	}
+	return head, addr, port, nil
 }
 
 func parseTextAddr(s string) (string, int, error) {

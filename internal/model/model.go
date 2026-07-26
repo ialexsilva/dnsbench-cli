@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -15,24 +16,50 @@ const (
 type Protocol string
 
 const (
-	ProtoUDP Protocol = "udp"
-	ProtoTCP Protocol = "tcp"
-	ProtoDoT Protocol = "dot"
-	ProtoDoH Protocol = "doh"
+	ProtoUDP  Protocol = "udp"
+	ProtoTCP  Protocol = "tcp"
+	ProtoDoT  Protocol = "dot"
+	ProtoDoH  Protocol = "doh"
+	ProtoDoH3 Protocol = "doh3"
+	ProtoDoQ  Protocol = "doq"
 )
+
+func AllProtocols() []Protocol {
+	return []Protocol{ProtoUDP, ProtoTCP, ProtoDoT, ProtoDoH, ProtoDoH3, ProtoDoQ}
+}
+
+func EncryptedProtocols() []Protocol {
+	var out []Protocol
+	for _, p := range AllProtocols() {
+		if p.Encrypted() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 func (p Protocol) DefaultPort() int {
 	switch p {
-	case ProtoDoT:
+	case ProtoDoT, ProtoDoQ:
 		return 853
-	case ProtoDoH:
+	case ProtoDoH, ProtoDoH3:
 		return 443
 	default:
 		return 53
 	}
 }
 
-func (p Protocol) Encrypted() bool { return p == ProtoDoT || p == ProtoDoH }
+func (p Protocol) Encrypted() bool {
+	switch p {
+	case ProtoDoT, ProtoDoH, ProtoDoH3, ProtoDoQ:
+		return true
+	}
+	return false
+}
+
+func (p Protocol) UsesURL() bool { return p == ProtoDoH || p == ProtoDoH3 }
+
+func (p Protocol) OverQUIC() bool { return p == ProtoDoH3 || p == ProtoDoQ }
 
 func (p Protocol) Label() string {
 	switch p {
@@ -44,6 +71,10 @@ func (p Protocol) Label() string {
 		return "DoT"
 	case ProtoDoH:
 		return "DoH"
+	case ProtoDoH3:
+		return "DoH/3"
+	case ProtoDoQ:
+		return "DoQ"
 	}
 	return string(p)
 }
@@ -124,7 +155,7 @@ func (s Server) EffectivePort() int {
 }
 
 func (s Server) Endpoint() string {
-	if s.Protocol == ProtoDoH && s.DoHURL != "" {
+	if s.Protocol.UsesURL() && s.DoHURL != "" {
 		return s.DoHURL
 	}
 	addr := s.Address
@@ -156,10 +187,28 @@ func (s Server) DisplayName() string {
 	if s.Name != "" {
 		return s.Name
 	}
-	if s.Protocol == ProtoDoH && s.DoHURL != "" {
+	if s.Protocol.UsesURL() && s.DoHURL != "" {
 		return s.DoHURL
 	}
 	return s.Address
+}
+
+func (s Server) BootstrapPinned() bool {
+	if !s.Protocol.Encrypted() {
+		return true
+	}
+	if !s.Protocol.UsesURL() {
+		return s.Address != ""
+	}
+	if s.Address != "" {
+		return true
+	}
+	host := s.DoHURL
+	if u, err := url.Parse(s.DoHURL); err == nil && u.Host != "" {
+		host = u.Hostname()
+	}
+	_, err := netip.ParseAddr(host)
+	return err == nil
 }
 
 type ErrKind string
@@ -351,13 +400,6 @@ type DNSSECInfo struct {
 	Validating          Verdict `json:"validating"`
 }
 
-type RebindInfo struct {
-	V4      Verdict  `json:"v4"`
-	V6      Verdict  `json:"v6"`
-	Overall Verdict  `json:"overall"`
-	Details []string `json:"details,omitempty"`
-}
-
 type ExtendedInfo struct {
 	DNS64             Verdict  `json:"dns64"`
 	QNAMEMinimization Verdict  `json:"qname_minimization"`
@@ -376,7 +418,6 @@ type ProbeResult struct {
 	DNSSEC            DNSSECInfo    `json:"dnssec"`
 	NXChecks          []NXCheck     `json:"nx_checks"`
 	NXInterception    Verdict       `json:"nx_interception"`
-	Rebind            RebindInfo    `json:"rebind"`
 	ReverseName       string        `json:"reverse_name,omitempty"`
 	Extended          *ExtendedInfo `json:"extended,omitempty"`
 	Errors            []string      `json:"errors,omitempty"`
@@ -536,7 +577,6 @@ type Weights struct {
 	PenaltyPerRetryPctMs    float64              `json:"penalty_per_retry_pct_ms"`
 	PenaltyNXInterceptionMs float64              `json:"penalty_nx_interception_ms"`
 	PenaltyNoDNSSECMs       float64              `json:"penalty_no_dnssec_ms"`
-	PenaltyNoRebindMs       float64              `json:"penalty_no_rebind_ms"`
 	JitterWeight            float64              `json:"jitter_weight"`
 }
 

@@ -17,7 +17,6 @@ func Presets() map[model.RankMode]model.Weights {
 			PenaltyPerRetryPctMs:    2,
 			PenaltyNXInterceptionMs: 5,
 			PenaltyNoDNSSECMs:       5,
-			PenaltyNoRebindMs:       5,
 			JitterWeight:            0.25,
 		},
 		model.RankBrowsing: {
@@ -33,7 +32,6 @@ func Presets() map[model.RankMode]model.Weights {
 			PenaltyPerRetryPctMs:    5,
 			PenaltyNXInterceptionMs: 15,
 			PenaltyNoDNSSECMs:       10,
-			PenaltyNoRebindMs:       10,
 			JitterWeight:            0.5,
 		},
 		model.RankReliability: {
@@ -49,7 +47,6 @@ func Presets() map[model.RankMode]model.Weights {
 			PenaltyPerRetryPctMs:    10,
 			PenaltyNXInterceptionMs: 25,
 			PenaltyNoDNSSECMs:       20,
-			PenaltyNoRebindMs:       20,
 			JitterWeight:            1.0,
 		},
 	}

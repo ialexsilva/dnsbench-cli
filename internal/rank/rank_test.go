@@ -33,7 +33,6 @@ func cleanProbe(id string) *model.ProbeResult {
 		Reachable:      true,
 		NXInterception: model.VerdictNo,
 		DNSSEC:         model.DNSSECInfo{Validating: model.VerdictYes},
-		Rebind:         model.RebindInfo{Overall: model.VerdictYes},
 	}
 }
 
@@ -271,48 +270,6 @@ func TestNoDNSSECPenaltyExact(t *testing.T) {
 		if !almostEqual(s.TotalMs, 20) {
 			t.Errorf("verdict %q: expected total 20, got %v", verdict, s.TotalMs)
 		}
-	}
-}
-
-func TestNoRebindPenaltyExact(t *testing.T) {
-	w := singleCatWeights("median")
-	w.PenaltyNoRebindMs = 10
-	stats := map[string]*model.ServerStats{
-		"s1": activeStats("s1", map[model.Category]*model.Distribution{
-			model.CatCached: {Count: 10, Answered: 10, MedianMs: 10},
-		}),
-	}
-	probe := cleanProbe("s1")
-	probe.Rebind.Overall = model.VerdictNo
-	probes := map[string]*model.ProbeResult{"s1": probe}
-	scores := ScoreServers(stats, probes, []model.Category{model.CatCached}, w, model.RankBrowsing)
-	s := findScore(t, scores, "s1")
-	if !almostEqual(s.Penalties["no-rebind-protection"], 10) {
-		t.Errorf("expected no-rebind-protection penalty 10, got %v", s.Penalties["no-rebind-protection"])
-	}
-	if !almostEqual(s.TotalMs, 20) {
-		t.Errorf("expected total 20, got %v", s.TotalMs)
-	}
-}
-
-func TestPartialRebindIsHalf(t *testing.T) {
-	w := singleCatWeights("median")
-	w.PenaltyNoRebindMs = 10
-	stats := map[string]*model.ServerStats{
-		"s1": activeStats("s1", map[model.Category]*model.Distribution{
-			model.CatCached: {Count: 10, Answered: 10, MedianMs: 10},
-		}),
-	}
-	probe := cleanProbe("s1")
-	probe.Rebind.Overall = model.VerdictPartial
-	probes := map[string]*model.ProbeResult{"s1": probe}
-	scores := ScoreServers(stats, probes, []model.Category{model.CatCached}, w, model.RankBrowsing)
-	s := findScore(t, scores, "s1")
-	if !almostEqual(s.Penalties["no-rebind-protection"], 5) {
-		t.Errorf("expected no-rebind-protection penalty 5, got %v", s.Penalties["no-rebind-protection"])
-	}
-	if !almostEqual(s.TotalMs, 15) {
-		t.Errorf("expected total 15, got %v", s.TotalMs)
 	}
 }
 

@@ -58,9 +58,7 @@ more DNS lookups, so a slow or unreliable resolver adds delay to everything.`,
     answers and rejects forged ones.
   - NXDOMAIN handling: whether the server honestly reports that a name does
     not exist, or intercepts the error and redirects you to ads or a search
-    page.
-  - Rebinding protection: whether the server blocks public names that resolve
-    to private addresses, a trick used to attack devices inside your network.`,
+    page.`,
 		},
 		{
 			"Why should the network be idle during the test?",

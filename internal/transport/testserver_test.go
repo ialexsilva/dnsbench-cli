@@ -1,12 +1,14 @@
 package transport
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -19,6 +21,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 )
 
 func boolFlag(b bool) int {
@@ -211,6 +215,141 @@ func startDoHServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+type captureWriter struct {
+	remote net.Addr
+	msg    *dns.Msg
+	closed bool
+}
+
+func (w *captureWriter) LocalAddr() net.Addr  { return w.remote }
+func (w *captureWriter) RemoteAddr() net.Addr { return w.remote }
+func (w *captureWriter) WriteMsg(m *dns.Msg) error {
+	w.msg = m
+	return nil
+}
+func (w *captureWriter) Write([]byte) (int, error) { return 0, errors.New("not supported") }
+func (w *captureWriter) Close() error              { w.closed = true; return nil }
+func (w *captureWriter) TsigStatus() error         { return nil }
+func (w *captureWriter) TsigTimersOnly(bool)       {}
+func (w *captureWriter) Hijack()                   {}
+
+func handleWith(h dns.Handler, query *dns.Msg) *dns.Msg {
+	// Keep shared handlers from applying UDP-only behavior such as truncation.
+	w := &captureWriter{remote: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}}
+	h.ServeDNS(w, query)
+	if w.closed {
+		return nil
+	}
+	return w.msg
+}
+
+func startDoQServer(t *testing.T, h dns.Handler) (int, *x509.CertPool) {
+	return startDoQServerWithHook(t, h, nil)
+}
+
+type doqResponseHook func(*quic.Stream, *dns.Msg, *dns.Msg) (handled bool)
+
+func startDoQServerWithHook(t *testing.T, h dns.Handler, hook doqResponseHook) (int, *x509.CertPool) {
+	t.Helper()
+	cert, pool := selfSignedCert(t)
+	ln, err := quic.ListenAddr("127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{doqALPN},
+	}, &quic.Config{})
+	if err != nil {
+		t.Fatalf("quic listen: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept(context.Background())
+			if err != nil {
+				return
+			}
+			go serveDoQConn(conn, h, hook)
+		}
+	}()
+	return ln.Addr().(*net.UDPAddr).Port, pool
+}
+
+func serveDoQConn(conn *quic.Conn, h dns.Handler, hook doqResponseHook) {
+	for {
+		str, err := conn.AcceptStream(context.Background())
+		if err != nil {
+			return
+		}
+		go func() {
+			req, _, err := readFramed(str)
+			if err != nil {
+				str.CancelWrite(0)
+				return
+			}
+			resp := handleWith(h, req)
+			if resp == nil {
+				str.CancelWrite(0)
+				return
+			}
+			if hook != nil && hook(str, req, resp) {
+				return
+			}
+			if err := writeFramed(str, resp); err != nil {
+				str.CancelWrite(0)
+				return
+			}
+			str.Close()
+		}()
+	}
+}
+
+func startDoH3Server(t *testing.T, h dns.Handler) (string, *x509.CertPool) {
+	t.Helper()
+	cert, pool := selfSignedCert(t)
+	srv := &http3.Server{
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serveDoHRequest(w, r, h) }),
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+	}
+	ln, err := quic.ListenAddr("127.0.0.1:0", http3.ConfigureTLSConfig(srv.TLSConfig), &quic.Config{})
+	if err != nil {
+		t.Fatalf("quic listen: %v", err)
+	}
+	go srv.ServeListener(ln)
+	t.Cleanup(func() {
+		srv.Close()
+		ln.Close()
+	})
+	port := ln.Addr().(*net.UDPAddr).Port
+	return fmt.Sprintf("https://dnsbench.test:%d/dns-query", port), pool
+}
+
+func serveDoHRequest(w http.ResponseWriter, r *http.Request, h dns.Handler) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	req := new(dns.Msg)
+	if err := req.Unpack(body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	resp := handleWith(h, req)
+	if resp == nil {
+		http.Error(w, "dropped", http.StatusInternalServerError)
+		return
+	}
+	out, err := resp.Pack()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", dohContentType)
+	w.Write(out)
 }
 
 func dohPool(t *testing.T, srv *httptest.Server) *x509.CertPool {

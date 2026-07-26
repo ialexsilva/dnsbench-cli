@@ -22,9 +22,11 @@ import (
 const dohContentType = "application/dns-message"
 
 type dohQuerier struct {
+	proto  model.Protocol
 	url    string
 	opts   Options
 	client *http.Client
+	closer func() error
 }
 
 func newDoHQuerier(s model.Server, o Options) *dohQuerier {
@@ -38,31 +40,44 @@ func newDoHQuerier(s model.Server, o Options) *dohQuerier {
 		DisableKeepAlives: !o.Persistent,
 	}
 	if s.Address != "" {
-		targetHost := s.Address
-		portOverride := s.Port
+		pinned := pinnedHostPort(s)
 		var d net.Dialer
 		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			_, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				port = strconv.Itoa(model.ProtoDoH.DefaultPort())
-			}
-			if portOverride != 0 {
-				port = strconv.Itoa(portOverride)
-			}
-			return d.DialContext(ctx, network, net.JoinHostPort(targetHost, port))
+			return d.DialContext(ctx, network, pinned(addr))
 		}
 	}
 	return &dohQuerier{
+		proto:  model.ProtoDoH,
 		url:    s.DoHURL,
 		opts:   o,
 		client: &http.Client{Transport: tr},
 	}
 }
 
-func (d *dohQuerier) Protocol() model.Protocol { return model.ProtoDoH }
+// pinnedHostPort redirects dialing without changing the URL host used for SNI.
+func pinnedHostPort(s model.Server) func(addr string) string {
+	host := s.Address
+	override := s.Port
+	fallback := strconv.Itoa(s.Protocol.DefaultPort())
+	return func(addr string) string {
+		port := fallback
+		if _, p, err := net.SplitHostPort(addr); err == nil {
+			port = p
+		}
+		if override != 0 {
+			port = strconv.Itoa(override)
+		}
+		return net.JoinHostPort(host, port)
+	}
+}
+
+func (d *dohQuerier) Protocol() model.Protocol { return d.proto }
 
 func (d *dohQuerier) Close() error {
 	d.client.CloseIdleConnections()
+	if d.closer != nil {
+		return d.closer()
+	}
 	return nil
 }
 
@@ -92,7 +107,8 @@ func (d *dohQuerier) Query(ctx context.Context, q Question) model.QueryResult {
 		},
 		ConnectDone: func(string, string, error) {
 			mu.Lock()
-			if !connectStart.IsZero() {
+			// HTTP/3 fires both hooks for one QUIC handshake; attribute it only to TLS.
+			if !connectStart.IsZero() && !d.proto.OverQUIC() {
 				ph.Connect = time.Since(connectStart)
 			}
 			mu.Unlock()
@@ -136,7 +152,7 @@ func (d *dohQuerier) Query(ctx context.Context, q Question) model.QueryResult {
 		mu.Lock()
 		phases := ph
 		mu.Unlock()
-		return errorResult(start, phases, classify(ctx, err))
+		return errorResult(start, phases, d.classify(ctx, err))
 	}
 	data, readErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -149,7 +165,7 @@ func (d *dohQuerier) Query(ctx context.Context, q Question) model.QueryResult {
 	mu.Unlock()
 	d.dropIdle()
 	if readErr != nil {
-		return errorResult(start, phases, classify(ctx, readErr))
+		return errorResult(start, phases, d.classify(ctx, readErr))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return errorResult(start, phases, &model.QueryError{Kind: model.ErrHTTP, Msg: fmt.Sprintf("unexpected HTTP status %s", resp.Status)})
@@ -166,6 +182,13 @@ func (d *dohQuerier) Query(ctx context.Context, q Question) model.QueryResult {
 	res.Reused = wasReused
 	res.RTT = time.Since(start)
 	return res
+}
+
+func (d *dohQuerier) classify(ctx context.Context, err error) *model.QueryError {
+	if d.proto.OverQUIC() {
+		return classifyQUIC(ctx, err)
+	}
+	return classify(ctx, err)
 }
 
 func (d *dohQuerier) dropIdle() {

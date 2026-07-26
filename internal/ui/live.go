@@ -103,6 +103,7 @@ type benchmarkEventMsg struct {
 }
 
 type eventsClosedMsg struct{}
+type livePrepareTickMsg struct{}
 
 func (ls *liveServer) totalSamples() int {
 	total, _, _ := ls.counts()
@@ -127,21 +128,23 @@ func (ls *liveServer) counts() (total, lost, invalid int) {
 }
 
 type Live struct {
-	servers     []model.Server
-	cfg         model.BenchConfig
-	out         io.Writer
-	isTTY       bool
-	sortKey     string
-	categories  []model.Category
-	byID        map[string]*liveServer
-	inflight    map[string]bool
-	start       time.Time
-	round       int
-	lastPctTen  int
-	noticeText  string
-	noticeColor func(string) string
-	width       int
-	height      int
+	servers      []model.Server
+	cfg          model.BenchConfig
+	out          io.Writer
+	isTTY        bool
+	sortKey      string
+	categories   []model.Category
+	byID         map[string]*liveServer
+	inflight     map[string]bool
+	start        time.Time
+	round        int
+	roundStarted int
+	prepareFrame int
+	lastPctTen   int
+	noticeText   string
+	noticeColor  func(string) string
+	width        int
+	height       int
 }
 
 const maxNoticeLines = 2
@@ -211,7 +214,7 @@ func (l *Live) Run(events <-chan model.Event) {
 }
 
 func (l *Live) Init() tea.Cmd {
-	return nil
+	return l.prepareTick()
 }
 
 func (l *Live) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -232,6 +235,12 @@ func (l *Live) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case eventsClosedMsg:
 		return l, tea.Quit
+	case livePrepareTickMsg:
+		if l.roundStarted > 0 {
+			return l, nil
+		}
+		l.prepareFrame++
+		return l, l.prepareTick()
 	}
 	return l, nil
 }
@@ -240,19 +249,28 @@ func (l *Live) View() string {
 	return l.renderFrame()
 }
 
+func (l *Live) prepareTick() tea.Cmd {
+	return tea.Tick(time.Second/liveFPS, func(time.Time) tea.Msg {
+		return livePrepareTickMsg{}
+	})
+}
+
 func (l *Live) handle(ev model.Event) {
 	switch ev.Type {
 	case model.EvQueryStart:
+		l.noteRoundStarted(ev.Round)
 		if ev.ServerID != "" {
 			l.inflight[ev.ServerID] = true
 		}
 	case model.EvSample:
 		if ev.Sample != nil {
+			l.noteRoundStarted(ev.Sample.Round)
 			delete(l.inflight, ev.Sample.ServerID)
 		}
 		l.recordSample(ev.Sample)
 	case model.EvRoundDone:
 		l.round = ev.Round
+		l.noteRoundStarted(ev.Round)
 		if !l.isTTY {
 			l.printProgress()
 		}
@@ -272,6 +290,12 @@ func (l *Live) handle(ev model.Event) {
 		l.notice(connLine("connectivity lost — benchmark paused", ev.Msg), Red)
 	case model.EvConnRestored:
 		l.notice(connLine("connectivity restored — resuming benchmark", ev.Msg), Green)
+	}
+}
+
+func (l *Live) noteRoundStarted(round int) {
+	if round > l.roundStarted {
+		l.roundStarted = round
 	}
 }
 
@@ -439,21 +463,89 @@ func (l *Live) renderFrame() string {
 
 func (l *Live) progressLine() string {
 	rounds := l.cfg.Rounds
-	pct := 0
+	if l.roundStarted <= 0 {
+		return l.preparingLine()
+	}
+
+	pct := 0.0
 	if rounds > 0 {
-		pct = l.round * 100 / rounds
+		pct = float64(l.round) * 100 / float64(rounds)
 		if pct > 100 {
 			pct = 100
 		}
 	}
 	elapsed := formatElapsed(time.Since(l.start))
-	suffix := fmt.Sprintf("%3d%%  round %d/%d  elapsed %s", pct, l.round, rounds, elapsed)
+	pctText := "0%"
+	if pct > 0 {
+		displayPct := max(1, int(math.Floor(pct)))
+		if l.round >= rounds {
+			displayPct = 100
+		}
+		pctText = fmt.Sprintf("%d%%", displayPct)
+	}
+	displayRound := max(l.round, l.roundStarted)
+	suffix := fmt.Sprintf("%4s  round %d/%d  elapsed %s", pctText, displayRound, rounds, elapsed)
 	barWidth := min(liveProgressWidth, l.width-visibleWidth(suffix)-4)
 	if barWidth < 4 {
-		return fmt.Sprintf("  %3d%%  round %d/%d  elapsed %s", pct, l.round, rounds, elapsed)
+		return "  " + suffix
 	}
-	bar := Green(Bar(float64(pct), 100, barWidth))
+	barValue := pct
+	if barValue <= 0 {
+		barValue = 0.01
+	}
+	bar := liveProgressBar(barValue, 100, barWidth)
 	return "  " + bar + "  " + suffix
+}
+
+func (l *Live) preparingLine() string {
+	const suffix = "preparing benchmark…"
+	barWidth := min(liveProgressWidth, l.width-visibleWidth(suffix)-4)
+	if barWidth < 6 {
+		return "  " + suffix
+	}
+	return "  " + oscillatingBar(barWidth, l.prepareFrame) + "  " + suffix
+}
+
+func oscillatingBar(width, frame int) string {
+	const (
+		rightComet = "░▒▓█"
+		leftComet  = "█▓▒░"
+	)
+	if width < 6 {
+		return ""
+	}
+	innerWidth := width - 2
+	cometWidth := len([]rune(rightComet))
+	lastStart := innerWidth - cometWidth
+	start := 0
+	comet := rightComet
+	if lastStart > 0 {
+		cycle := lastStart * 2
+		phase := frame % cycle
+		start = phase
+		if phase > lastStart {
+			start = cycle - phase
+			comet = leftComet
+		}
+	}
+	before := strings.Repeat("·", start)
+	after := strings.Repeat("·", innerWidth-start-cometWidth)
+	head, tail := "█", "▓▒░"
+	if comet == rightComet {
+		head, tail = "█", "░▒▓"
+		return Gray("▏"+before) + Cyan(tail) + White(head) + Gray(after+"▕")
+	}
+	return Gray("▏"+before) + White(head) + Cyan(tail) + Gray(after+"▕")
+}
+
+func liveProgressBar(value, maximum float64, width int) string {
+	if width < 3 {
+		return Green(Bar(value, maximum, width))
+	}
+	innerWidth := width - 2
+	fill := strings.TrimRight(Bar(value, maximum, innerWidth), " ")
+	empty := innerWidth - len([]rune(fill))
+	return Gray("▏") + Green(fill) + Gray(strings.Repeat("·", empty)+"▕")
 }
 
 func (l *Live) legendLine() string {

@@ -20,14 +20,12 @@ func TestRenderServersTable(t *testing.T) {
 			Reachable:      true,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictYes},
 			NXInterception: model.VerdictNo,
-			Rebind:         model.RebindInfo{Overall: model.VerdictYes},
 		},
 		"router": {
 			ServerID:       "router",
 			Reachable:      true,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictNo},
 			NXInterception: model.VerdictYes,
-			Rebind:         model.RebindInfo{Overall: model.VerdictNo},
 		},
 	}
 	states := map[string]model.ServerState{
@@ -37,7 +35,7 @@ func TestRenderServersTable(t *testing.T) {
 	}
 	out := RenderServersTable(servers, probes, states)
 	for _, want := range []string{
-		"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain", "rebind",
+		"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain",
 		"1.1.1.1:53", "192.168.1.1:53", "https://dns.mullvad.net/dns-query",
 		"Cloudflare Inc",
 		"UDP/53", "DoH",
@@ -58,7 +56,7 @@ func TestRenderServerCharacteristicsCompact(t *testing.T) {
 	out := RenderServerCharacteristics(chartFixture())
 	for _, want := range []string{
 		"● current DNS resolver",
-		"resolver", "proto", "status", "dnssec", "nxdomain", "rebind",
+		"resolver", "proto", "status", "dnssec", "nxdomain",
 		"Google Public DNS", "Cloudflare", "Quad9 Secure",
 		"active", "sidelined", "unreachable",
 	} {

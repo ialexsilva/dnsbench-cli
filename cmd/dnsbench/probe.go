@@ -38,7 +38,7 @@ func registerSelectionFlags(cmd *cobra.Command, sel *selectionFlags) {
 	cmd.Flags().StringSliceVar(&sel.only, "only", nil, "restrict to servers matching these IDs or addresses")
 	cmd.Flags().StringVar(&sel.serversFile, "servers-file", "", "extra server list file to include (.json, .csv or .txt)")
 	cmd.Flags().BoolVar(&sel.noIPv6, "no-ipv6", false, "exclude servers with IPv6 addresses")
-	cmd.Flags().StringSliceVar(&sel.protocols, "protocols", nil, "only include these protocols (udp, tcp, dot, doh)")
+	cmd.Flags().StringSliceVar(&sel.protocols, "protocols", nil, "only include these protocols (udp, tcp, dot, doh, doh3, doq)")
 }
 
 type selectedServers struct {
@@ -166,12 +166,13 @@ func newProbeCmd() *cobra.Command {
 	var timeout time.Duration
 	var concurrency int
 	var jsonPath string
+	base := probe.DefaultConfig()
 	cmd := &cobra.Command{
 		Use:   "probe",
 		Short: "Characterize DNS servers without benchmarking them",
 		Long: `Characterizes each selected DNS server: reachability, EDNS0, DNSSEC
-validation, NXDOMAIN handling and DNS rebinding protection. No latency
-benchmark is run; use "dnsbench run" for the full measurement.`,
+validation and NXDOMAIN handling. No latency benchmark is run; use
+"dnsbench run" for the full measurement.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -220,10 +221,10 @@ benchmark is run; use "dnsbench run" for the full measurement.`,
 	}
 	registerSelectionFlags(cmd, &sel)
 	cmd.Flags().BoolVar(&extended, "extended", false, "run extended checks (DNS64, QNAME minimization, HTTPS records)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "timeout per query")
-	cmd.Flags().IntVar(&concurrency, "concurrency", 8, "how many servers to probe in parallel")
+	cmd.Flags().DurationVar(&timeout, "timeout", base.Timeout, "timeout per query")
+	cmd.Flags().IntVar(&concurrency, "concurrency", base.Concurrency, "how many servers to probe in parallel")
 	cmd.Flags().StringVar(&jsonPath, "json", "", "write raw probe results to this JSON file")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show per-check NXDOMAIN and rebinding details")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show per-check NXDOMAIN details")
 	return cmd
 }
 
@@ -250,11 +251,6 @@ func printProbeDetails(out io.Writer, servers []model.Server, results map[string
 				}
 				fmt.Fprintln(out, line)
 			}
-		}
-		fmt.Fprintf(out, "  rebinding protection: v4 %s, v6 %s, overall %s\n",
-			r.Rebind.V4.Label(), r.Rebind.V6.Label(), r.Rebind.Overall.Label())
-		for _, d := range r.Rebind.Details {
-			fmt.Fprintln(out, "    "+d)
 		}
 		if r.Extended != nil {
 			fmt.Fprintf(out, "  extended: DNS64 %s, QNAME minimization %s, HTTPS record %s\n",

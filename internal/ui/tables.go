@@ -81,7 +81,7 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 		return strings.ToLower(servers[i].DisplayName()) < strings.ToLower(servers[j].DisplayName())
 	})
 
-	headers := []string{" ", "resolver", "proto", "status", "dnssec", "nxdomain", "rebind"}
+	headers := []string{" ", "resolver", "proto", "status", "dnssec", "nxdomain"}
 	rows := make([][]string, 0, len(servers))
 	for _, s := range servers {
 		marker := ""
@@ -96,7 +96,6 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 			statusCell(states, s.ID),
 			dnssecCell(p),
 			nxCell(p),
-			rebindCell(p),
 		})
 	}
 	legend := ""
@@ -107,7 +106,7 @@ func RenderServerCharacteristics(res *model.RunResult) string {
 }
 
 func RenderServersTable(servers []model.Server, probes map[string]*model.ProbeResult, states map[string]model.ServerState) string {
-	headers := []string{"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain", "rebind"}
+	headers := []string{"endpoint", "name", "operator", "protocol", "source", "scope", "status", "dnssec", "nxdomain"}
 	rows := make([][]string, 0, len(servers))
 	for _, s := range servers {
 		p := probes[s.ID]
@@ -121,7 +120,6 @@ func RenderServersTable(servers []model.Server, probes map[string]*model.ProbeRe
 			statusCell(states, s.ID),
 			dnssecCell(p),
 			nxCell(p),
-			rebindCell(p),
 		})
 	}
 	return renderTable(headers, nil, rows)
@@ -135,7 +133,7 @@ func dashIfEmpty(s string) string {
 }
 
 func scopeCell(s model.Server) string {
-	if s.Protocol == model.ProtoDoH && s.Address == "" {
+	if s.Protocol.UsesURL() && s.Address == "" {
 		return "remote"
 	}
 	return model.ScopeOfString(s.Address).Label()
@@ -204,13 +202,6 @@ func nxCell(p *model.ProbeResult) string {
 		return Yellow("partial")
 	}
 	return "?"
-}
-
-func rebindCell(p *model.ProbeResult) string {
-	if p == nil {
-		return "?"
-	}
-	return coloredVerdict(p.Rebind.Overall)
 }
 
 func RenderMetricsTable(res *model.RunResult, category model.Category, sortKey string) string {

@@ -23,8 +23,8 @@ func usageErrorf(format string, args ...any) error {
 const rootLong = `dnsbench benchmarks and diagnoses recursive DNS servers as seen from YOUR network.
 
 It measures cached, uncached and recursive-path latency, packet loss, stability,
-DNSSEC validation, NXDOMAIN handling and DNS rebinding protection, then ranks the
-servers and explains the results in plain language.
+DNSSEC validation and NXDOMAIN handling, then ranks the servers and explains the
+results in plain language.
 
 Every number produced by this tool is specific to this network, this ISP, this
 location and this time of day. A server that wins here can lose on another

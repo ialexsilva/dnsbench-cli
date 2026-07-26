@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,12 +33,10 @@ func parseProtocols(values []string) ([]model.Protocol, error) {
 	var out []model.Protocol
 	for _, v := range values {
 		p := model.Protocol(strings.ToLower(strings.TrimSpace(v)))
-		switch p {
-		case model.ProtoUDP, model.ProtoTCP, model.ProtoDoT, model.ProtoDoH:
-			out = append(out, p)
-		default:
-			return nil, usageErrorf("invalid protocol %q (accepted: udp, tcp, dot, doh)", v)
+		if !slices.Contains(model.AllProtocols(), p) {
+			return nil, usageErrorf("invalid protocol %q (accepted: udp, tcp, dot, doh, doh3, doq)", v)
 		}
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -108,7 +107,7 @@ func newServersListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&protocols, "protocol", nil, "only show servers using these protocols (udp, tcp, dot, doh)")
+	cmd.Flags().StringSliceVar(&protocols, "protocol", nil, "only show servers using these protocols (udp, tcp, dot, doh, doh3, doq)")
 	cmd.Flags().StringSliceVar(&operators, "operator", nil, "only show servers run by these operators")
 	cmd.Flags().StringSliceVar(&sources, "source", nil, "only show servers from these sources (system, builtin, user)")
 	return cmd
@@ -163,11 +162,11 @@ func newServersAddCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "name", "", "display name for the server")
 	cmd.Flags().StringVar(&operator, "operator", "", "organization operating the server")
-	cmd.Flags().StringVar(&protocol, "protocol", "udp", "protocol: udp, tcp, dot or doh")
-	cmd.Flags().StringVar(&address, "address", "", "IP address (required for udp, tcp and dot)")
+	cmd.Flags().StringVar(&protocol, "protocol", "udp", "protocol: udp, tcp, dot, doh, doh3 or doq")
+	cmd.Flags().StringVar(&address, "address", "", "IP address (required for udp, tcp, dot and doq; pins the bootstrap IP for doh and doh3)")
 	cmd.Flags().IntVar(&port, "port", 0, "port (0 uses the protocol default)")
-	cmd.Flags().StringVar(&tlsHostname, "tls-hostname", "", "TLS server name for DoT")
-	cmd.Flags().StringVar(&dohURL, "doh-url", "", "https URL for DoH")
+	cmd.Flags().StringVar(&tlsHostname, "tls-hostname", "", "TLS server name for DoT and DoQ")
+	cmd.Flags().StringVar(&dohURL, "doh-url", "", "https URL for DoH and DoH/3")
 	cmd.Flags().StringVar(&notes, "notes", "", "free-form notes")
 	return cmd
 }

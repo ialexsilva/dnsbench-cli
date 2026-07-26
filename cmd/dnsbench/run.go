@@ -168,7 +168,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 		var spinner *ui.Spinner
 		if !f.quiet {
 			fmt.Fprintln(out)
-			label := fmt.Sprintf("Characterizing %s — DNSSEC, NXDOMAIN, rebinding", countNoun(len(selection.servers), "server"))
+			label := fmt.Sprintf("Characterizing %s — DNSSEC, NXDOMAIN", countNoun(len(selection.servers), "server"))
 			spinner = ui.NewSpinner(out, stdoutIsTTY(), label, len(selection.servers))
 			spinner.Start()
 		}

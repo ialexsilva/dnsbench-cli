@@ -16,7 +16,6 @@ const (
 	penaltyJitter         = "jitter"
 	penaltyNXInterception = "nxdomain-interception"
 	penaltyNoDNSSEC       = "no-dnssec"
-	penaltyNoRebind       = "no-rebind-protection"
 )
 
 func ScoreServers(stats map[string]*model.ServerStats, probes map[string]*model.ProbeResult, categories []model.Category, w model.Weights, mode model.RankMode) []model.Score {
@@ -131,12 +130,6 @@ func computePenalties(st *model.ServerStats, cats []model.Category, probe *model
 		}
 		if probe.DNSSEC.Validating != model.VerdictYes {
 			addPenalty(pens, penaltyNoDNSSEC, w.PenaltyNoDNSSECMs)
-		}
-		switch probe.Rebind.Overall {
-		case model.VerdictNo:
-			addPenalty(pens, penaltyNoRebind, w.PenaltyNoRebindMs)
-		case model.VerdictPartial:
-			addPenalty(pens, penaltyNoRebind, w.PenaltyNoRebindMs/2)
 		}
 	}
 	if len(pens) == 0 {

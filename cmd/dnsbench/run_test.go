@@ -21,6 +21,13 @@ func TestRunCommandModernDefaults(t *testing.T) {
 	}
 }
 
+func TestProbeCommandHasNoPacingFlag(t *testing.T) {
+	cmd := newProbeCmd()
+	if got := cmd.Flags().Lookup("pace"); got != nil {
+		t.Fatalf("probe unexpectedly exposes --pace: %+v", got)
+	}
+}
+
 func TestMatchSystemServerIDsByEndpoint(t *testing.T) {
 	selected := []model.Server{
 		{ID: "builtin-quad9", Address: "9.9.9.9", Port: 53, Protocol: model.ProtoUDP, Source: model.SourceBuiltin},

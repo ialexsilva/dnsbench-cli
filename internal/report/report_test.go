@@ -79,21 +79,18 @@ func testResult() *model.RunResult {
 			Reachable:      true,
 			NXInterception: model.VerdictNo,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictNo},
-			Rebind:         model.RebindInfo{Overall: model.VerdictNo},
 		},
 		"steady": {
 			ServerID:       "steady",
 			Reachable:      true,
 			NXInterception: model.VerdictNo,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictYes},
-			Rebind:         model.RebindInfo{Overall: model.VerdictYes},
 		},
 		"speedy": {
 			ServerID:       "speedy",
 			Reachable:      true,
 			NXInterception: model.VerdictYes,
 			DNSSEC:         model.DNSSECInfo{Validating: model.VerdictYes},
-			Rebind:         model.RebindInfo{Overall: model.VerdictYes},
 			NXChecks: []model.NXCheck{
 				{Label: "random subdomain", QName: "x.example.invalid", Behavior: model.NXInterceptedIP, Detail: "returned 203.0.113.80"},
 			},
@@ -135,7 +132,6 @@ func testResult() *model.RunResult {
 			PenaltyPerServfailPctMs: 3.0,
 			PenaltyNXInterceptionMs: 10.0,
 			PenaltyNoDNSSECMs:       5.0,
-			PenaltyNoRebindMs:       5.0,
 			JitterWeight:            0.2,
 		}
 	}

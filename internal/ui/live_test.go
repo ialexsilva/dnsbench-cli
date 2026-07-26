@@ -201,6 +201,83 @@ func TestLiveModelUpdatesStateWithoutWritingDirectly(t *testing.T) {
 	}
 }
 
+func TestLiveProgressSwitchesWhenFirstMeasuredRoundStarts(t *testing.T) {
+	disableColors(t)
+	cfg := model.DefaultBenchConfig(model.ModeQuick)
+	cfg.Rounds = 250
+	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
+	l.width = 80
+
+	first := l.progressLine()
+	if !strings.Contains(first, "preparing benchmark") {
+		t.Fatalf("initial progress is missing the preparation message: %q", first)
+	}
+	if strings.Contains(first, "0%") || strings.Contains(first, "round 0/") {
+		t.Fatalf("initial progress should be indeterminate instead of showing zero: %q", first)
+	}
+
+	updated, cmd := l.Update(livePrepareTickMsg{})
+	if updated != l || cmd == nil {
+		t.Fatalf("preparation tick returned model=%T cmd=%v", updated, cmd)
+	}
+	if second := l.progressLine(); second == first {
+		t.Fatalf("preparation bar did not move after a tick: %q", second)
+	}
+
+	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 0})
+	if warmup := l.progressLine(); !strings.Contains(warmup, "preparing benchmark") {
+		t.Fatalf("warmup should still be shown as preparation: %q", warmup)
+	}
+
+	l.handle(model.Event{Type: model.EvQueryStart, ServerID: "a", Round: 1})
+	running := l.progressLine()
+	if strings.Contains(running, "preparing benchmark") {
+		t.Fatalf("progress remained in preparation after measurement started: %q", running)
+	}
+	if !strings.Contains(running, "  0%") || !strings.Contains(running, "round 1/250") {
+		t.Fatalf("first measured query progress = %q, want 0%% and round 1/250", running)
+	}
+
+	l.handle(model.Event{Type: model.EvRoundDone, Round: 1})
+	completed := l.progressLine()
+	if !strings.Contains(completed, "  1%") || !strings.Contains(completed, "round 1/250") {
+		t.Fatalf("first completed round progress = %q, want 1%% and round 1/250", completed)
+	}
+}
+
+func TestLiveProgressDoesNotReach100BeforeFinalRound(t *testing.T) {
+	disableColors(t)
+	cfg := model.DefaultBenchConfig(model.ModeQuick)
+	cfg.Rounds = 250
+	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
+	l.width = 80
+
+	l.handle(model.Event{Type: model.EvRoundDone, Round: 249})
+	penultimate := l.progressLine()
+	if !strings.Contains(penultimate, "99%") || strings.Contains(penultimate, "100%") {
+		t.Fatalf("penultimate progress = %q, want 99%% and not 100%%", penultimate)
+	}
+
+	l.handle(model.Event{Type: model.EvRoundDone, Round: 250})
+	if complete := l.progressLine(); !strings.Contains(complete, "100%") {
+		t.Fatalf("completed progress = %q, want 100%%", complete)
+	}
+}
+
+func TestOscillatingBarBounces(t *testing.T) {
+	disableColors(t)
+
+	if got, want := oscillatingBar(10, 0), "▏░▒▓█····▕"; got != want {
+		t.Fatalf("initial oscillating bar = %q, want %q", got, want)
+	}
+	if got, want := oscillatingBar(10, 4), "▏····░▒▓█▕"; got != want {
+		t.Fatalf("far edge oscillating bar = %q, want %q", got, want)
+	}
+	if got, want := oscillatingBar(10, 6), "▏··█▓▒░··▕"; got != want {
+		t.Fatalf("returning oscillating bar = %q, want %q", got, want)
+	}
+}
+
 func TestLiveLossAndInvalidAreLabeledSeparately(t *testing.T) {
 	disableColors(t)
 	cfg := model.DefaultBenchConfig(model.ModeQuick)

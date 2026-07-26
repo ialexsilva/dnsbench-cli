@@ -65,11 +65,11 @@ func weightsLine(wts model.Weights) string {
 	if metric == "" {
 		metric = "-"
 	}
-	return fmt.Sprintf("Weights: categories %s; latency metric %s; penalties in ms: per loss pct %.1f, per SERVFAIL pct %.1f, per invalid-response pct %.1f, per retry pct %.1f, NX interception %.1f, no DNSSEC %.1f, no rebind protection %.1f; jitter weight %.2f\n",
+	return fmt.Sprintf("Weights: categories %s; latency metric %s; penalties in ms: per loss pct %.1f, per SERVFAIL pct %.1f, per invalid-response pct %.1f, per retry pct %.1f, NX interception %.1f, no DNSSEC %.1f; jitter weight %.2f\n",
 		catPart, metric,
 		wts.PenaltyPerLossPctMs, wts.PenaltyPerServfailPctMs,
 		wts.PenaltyPerInvalidPctMs, wts.PenaltyPerRetryPctMs, wts.PenaltyNXInterceptionMs,
-		wts.PenaltyNoDNSSECMs, wts.PenaltyNoRebindMs, wts.JitterWeight)
+		wts.PenaltyNoDNSSECMs, wts.JitterWeight)
 }
 
 func summaryTable(res *model.RunResult, sel model.RankMode) string {

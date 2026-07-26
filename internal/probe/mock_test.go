@@ -2,7 +2,6 @@ package probe
 
 import (
 	"net"
-	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -15,14 +14,11 @@ type profile int
 const (
 	profileValidating profile = iota
 	profileInterceptor
-	profileRebindBlocking
-	profileRebindUnprotected
 )
 
 const (
 	interceptIP    = "203.0.113.99"
 	interceptCNAME = "landing.intercept.test."
-	rebindSuffix   = ".rebind.test."
 )
 
 func aRR(name, ip string) dns.RR {
@@ -83,44 +79,6 @@ func httpsRR(name string) dns.RR {
 	}}
 }
 
-func embeddedIP(host string) string {
-	if _, err := netip.ParseAddr(host); err == nil {
-		return host
-	}
-	v6 := strings.ReplaceAll(host, "-", ":")
-	if _, err := netip.ParseAddr(v6); err == nil {
-		return v6
-	}
-	return ""
-}
-
-func serveRebind(m *dns.Msg, q dns.Question, p profile) {
-	host := strings.TrimSuffix(strings.ToLower(q.Name), rebindSuffix)
-	switch p {
-	case profileRebindBlocking:
-		return
-	case profileInterceptor:
-		m.Answer = append(m.Answer, aRR(q.Name, interceptIP))
-		return
-	case profileValidating:
-		if q.Qtype == dns.TypeA {
-			return
-		}
-	}
-	ip := embeddedIP(host)
-	if ip == "" {
-		m.Rcode = dns.RcodeNameError
-		return
-	}
-	isV6 := strings.Contains(ip, ":")
-	if q.Qtype == dns.TypeA && !isV6 {
-		m.Answer = append(m.Answer, aRR(q.Name, ip))
-	}
-	if q.Qtype == dns.TypeAAAA && isV6 {
-		m.Answer = append(m.Answer, aaaaRR(q.Name, ip))
-	}
-}
-
 func serveUnknown(m *dns.Msg, q dns.Question, p profile) {
 	switch p {
 	case profileInterceptor:
@@ -129,7 +87,6 @@ func serveUnknown(m *dns.Msg, q dns.Question, p profile) {
 			return
 		}
 		m.Answer = append(m.Answer, aRR(q.Name, interceptIP))
-	case profileRebindBlocking:
 	default:
 		m.Rcode = dns.RcodeNameError
 	}
@@ -137,14 +94,12 @@ func serveUnknown(m *dns.Msg, q dns.Question, p profile) {
 
 func serveBogus(m *dns.Msg, q dns.Question, req *dns.Msg, p profile) {
 	switch p {
-	case profileValidating, profileRebindBlocking:
+	case profileValidating:
 		if req.CheckingDisabled {
 			m.Answer = append(m.Answer, aRR(q.Name, "192.0.2.66"))
 			return
 		}
 		m.Rcode = dns.RcodeServerFailure
-	case profileRebindUnprotected:
-		m.Rcode = dns.RcodeNameError
 	default:
 		m.Answer = append(m.Answer, aRR(q.Name, "192.0.2.66"))
 	}
@@ -176,8 +131,6 @@ func mockHandler(p profile) dns.HandlerFunc {
 			}
 		case name == "bogus.test.":
 			serveBogus(m, q, req, p)
-		case strings.HasSuffix(name, rebindSuffix):
-			serveRebind(m, q, p)
 		case name == "1.0.0.127.in-addr.arpa." && q.Qtype == dns.TypePTR:
 			m.Answer = append(m.Answer, ptrRR(q.Name, "resolver.test."))
 		case name == "ipv4only.arpa." && q.Qtype == dns.TypeAAAA:

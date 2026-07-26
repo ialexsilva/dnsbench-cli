@@ -14,11 +14,17 @@ tld:       qname = randomLabel(rng, 16) + "." + tldZone          # default zone:
 randomLabel(rng, 16) = 16 characters drawn from [a-z0-9]
 ```
 
-- **cached** — a curated set of 72 popular domains on generic TLDs, ranked globally rather than for one country. 66 of them come from the [Semrush most visited websites in the world](https://www.semrush.com/trending-websites/global/all) top 100 for May 2026; the other 6 are carried over from the previous set because they were already vetted and still widely used. Exclusions: adult and gambling domains, so resolvers that intentionally filter those categories are not penalized; **every country-edition domain** (`.br`, `.de`, `.it`, `.co.uk`, `.pt`, `.co.jp`, `.in`, `.vn`, `.ru`, `.su`), because a national storefront or edition measures one country rather than the global web — a brand on a generic TLD such as `globo.com` is kept, so the rule is about the extension, not the company; region-specific Asian services on generic TLDs (naver, rakuten, note); volatile piracy aggregators whose traffic appears and vanishes between snapshots; and any domain owned by a resolver dnsbench benchmarks (Google, Cloudflare, Cisco/OpenDNS, DigiCert, Comodo, Gcore, NextDNS, AdGuard, Quad9, Control D) to avoid a home-domain advantage. `.ai`, `.io`, `.net`, `.org`, `.tv` and `.us` are kept: those domains are the service's global home, not a national edition. A maintainer pass then trims the filtered result by hand, dropping redundant corporate properties, redirect-only short-link domains, and entries whose traffic came from a single event — so the file is smaller than the ranking it derives from, on purpose. Rank order inside the file is informational only — `buildQName` cycles the list uniformly, so every domain is queried equally often, and the count is therefore not a tuning knob. The editable source is [`internal/model/cached_domains.json`](../internal/model/cached_domains.json); rebuild the executable after changing it because the file is embedded at compile time. Measures the hot-cache answer path you feel most often while browsing.
+- **cached** — a curated set of 72 popular domains on generic TLDs, ranked globally rather than for one country. 66 of them come from the [Semrush most visited websites in the world](https://www.semrush.com/trending-websites/global/all) top 100 for May 2026; the other 6 are carried over from the previous set because they were already vetted and still widely used. Exclusions: adult and gambling domains, so resolvers that intentionally filter those categories are not penalized; **every country-edition domain** (`.br`, `.de`, `.it`, `.co.uk`, `.pt`, `.co.jp`, `.in`, `.vn`, `.ru`, `.su`), because a national storefront or edition measures one country rather than the global web — a brand on a generic TLD such as `globo.com` is kept, so the rule is about the extension, not the company; region-specific Asian services on generic TLDs (naver, rakuten, note); volatile piracy aggregators whose traffic appears and vanishes between snapshots; and any domain owned by a resolver dnsbench benchmarks (Google, Cloudflare, Cisco/OpenDNS, Mullvad, NextDNS, AdGuard, Quad9, Control D) to avoid a home-domain advantage. `.ai`, `.io`, `.net`, `.org`, `.tv` and `.us` are kept: those domains are the service's global home, not a national edition. A maintainer pass then trims the filtered result by hand, dropping redundant corporate properties, redirect-only short-link domains, and entries whose traffic came from a single event — so the file is smaller than the ranking it derives from, on purpose. Rank order inside the file is informational only — `buildQName` cycles the list uniformly, so every domain is queried equally often, and the count is therefore not a tuning knob. The editable source is [`internal/model/cached_domains.json`](../internal/model/cached_domains.json); rebuild the executable after changing it because the file is embedded at compile time. Measures the hot-cache answer path you feel most often while browsing.
 - **uncached** — a random label under a zone **you control**, so every query is a guaranteed cache miss and forces a real recursion to your zone's authoritative server. Disabled unless `--uncached-zone` is set (dnsbench prints a notice and drops the category rather than fake it against zones you do not own).
 - **tld (recursive/TLD)** — a random label under a public TLD (default `com`, configurable with `--tld-zone`). Virtually all of these names do not exist, so the resolver must walk its recursion path down to the TLD infrastructure and return NXDOMAIN. This exercises the resolver's recursion machinery without needing infrastructure of your own.
 
 Default categories are `cached` and `tld`; passing `--uncached-zone` enables all three, and `--categories` selects any subset explicitly.
+
+## Characterization sessions
+
+Before latency measurement, the characterization phase checks reachability, DNSSEC and NXDOMAIN handling. It creates one persistent `Querier` per server and reuses that session for every check. This matters most for DoT, DoH, DoH/3 and DoQ: opening a fresh encrypted connection for every qualitative check would turn a normal probe into a burst of TCP, TLS or QUIC handshakes and could trigger NAT pressure or server-side connection limits.
+
+Characterization has no launch pacer: its small qualitative workload is already bounded by the `--concurrency` limit (default 8), and its timing is never admitted into benchmark latency distributions.
 
 ## What counts as a valid resolution
 
@@ -46,7 +52,7 @@ Instead of testing server A to completion and then server B (which would let net
 
 - The **server order is reshuffled every round** with a seeded PCG generator, so no server systematically benefits from always being measured first or last.
 - Each server runs its **categories in per-server shuffled order**. A `--gap` pause (default 40ms) is enforced from the completion of one query to the start of the next query to that server, including across category and round boundaries.
-- Every query launch — across all servers, including triage probes and retries — passes through a **global pacer**: launches are spaced at least `--pace` apart (default 20ms, plus a small seeded jitter; `--pace 0` disables). Pacing bounds the instantaneous packet burst to one query per tick regardless of hardware, so the benchmark cannot congest the local Wi-Fi link, NAT router or uplink and then misattribute the resulting drops and queueing delay as server loss and latency.
+- Every benchmark query launch — across all servers, including triage probes and retries — passes through a **global pacer**: launches are spaced at least `--pace` apart (default 20ms, plus a small seeded jitter; `--pace 0` disables). Pacing bounds the instantaneous packet burst to one query per tick regardless of hardware, so the benchmark cannot congest the local Wi-Fi link, NAT router or uplink and then misattribute the resulting drops and queueing delay as server loss and latency.
 - The pace **adapts AIMD-style** while the run progresses. Speed-up: every 50 answered queries with no congestion signal shorten the interval by an eighth of `--pace`, down to a floor of a quarter of `--pace`, so clean networks earn back wall-clock time. Back-off: when timeouts land on **3 or more distinct servers that had previously answered** within a 2-second window — the signature of local congestion, not of any one server — the interval doubles, up to a ceiling of 8× `--pace`, and further backoffs are suppressed for one query-timeout period so the tail of the same event is not double-counted. Servers that never answered do not count toward the signature, so dead or blackholed endpoints (e.g. unroutable IPv6) cannot slow the run. Each backoff is reported live as a pacing notice.
 - Cross-server parallelism is additionally capped by the `--concurrency` in-flight limit (default 8), which acts as a safety valve: when many servers stop answering, at most that many queries wait on timeouts at once, which naturally throttles the stream.
 
@@ -68,14 +74,30 @@ Every query attempt has a hard `--timeout` (default 3s), enforced through contex
 
 If all attempts fail, the query contributes to loss. `SERVFAIL` is a transport response rather than loss, but it is not a valid resolution and receives its own reliability penalty. Retried queries receive a smaller separate penalty because a final success does not erase the delay and fragility the user experienced.
 
-## Cold versus persistent connections (DoH/DoT)
+## Cold versus persistent connections (DoT/DoH/DoH3/DoQ)
 
 Encrypted transports pay a connection cost (TCP + TLS handshake, plus HTTP setup for DoH) that plain UDP does not. dnsbench keeps two regimes strictly separate via `--session`:
 
-- **persistent** (default) — one session per server is opened before the rounds and reused throughout: DoT/TCP reuse the established connection, DoH keeps HTTP keep-alives (HTTP/2 where negotiated). Warmup absorbs initial setup, and the measured rounds represent the steady-state behavior used by modern operating systems and applications.
-- **cold** — every query opens a fresh connection and tears it down: for DoT a full TCP+TLS handshake per query; for DoH keep-alives are disabled and idle connections dropped after each request. Use this explicitly to study worst-case first-contact cost.
+- **persistent** (default) — one session per server is opened before the rounds and reused throughout: DoT/TCP reuse the established connection, DoH keeps HTTP keep-alives (HTTP/2 where negotiated), and DoH/3 and DoQ keep the QUIC connection, opening one new stream per query. Warmup absorbs initial setup, and the measured rounds represent the steady-state behavior used by modern operating systems and applications.
+- **cold** — every query opens a fresh connection and tears it down: for DoT a full TCP+TLS handshake per query; for DoH keep-alives are disabled and idle connections dropped after each request; for DoH/3 and DoQ a fresh QUIC handshake per query. Use this explicitly to study worst-case first-contact cost.
 
-The mode applies to the entire run; cold and persistent numbers must never be compared as if they measured the same workload. Per-phase timings (connect, TLS handshake, HTTP setup, query), cold-start latency, steady-state latency and cold/reused sample counts are retained so encrypted transport setup remains inspectable without contaminating the default steady-state ranking.
+DoQ timeouts and caller cancellation abort only the affected stream with `DOQ_REQUEST_CANCELLED`; a healthy persistent QUIC connection remains available for the next query. A response is accepted only after exactly one framed DNS message followed by the stream FIN. Missing FIN, trailing response bytes, malformed DNS and message-ID violations are protocol errors and invalidate the connection with `DOQ_PROTOCOL_ERROR`. Ordinary EDNS-enabled DoQ queries also carry EDNS Padding to a 128-byte DNS-message boundary.
+
+The mode applies to latency-measurement samples; cold and persistent numbers must never be compared as if they measured the same workload. Characterization is qualitative, always reuses one session per server and bounds simultaneous server checks with its concurrency limit. Per-phase timings (connect, TLS handshake, HTTP setup, query), cold-start latency, steady-state latency and cold/reused sample counts are retained so encrypted transport setup remains inspectable without contaminating the default steady-state ranking.
+
+QUIC establishes the transport and the cryptographic handshake together, so `doh3` and `doq` report that single handshake under the TLS phase and leave the connect phase at zero. A QUIC transport is therefore expected to show a lower total setup cost than DoT or DoH at the same round-trip distance; that difference is real, not an artifact of how the phases are attributed.
+
+## Bootstrap resolution
+
+An encrypted endpoint identified by hostname has a chicken-and-egg problem: the hostname has to be resolved before the encrypted connection exists, and that lookup travels in plaintext to whatever resolver the system is configured with. On a network that intercepts port 53 — a common router default — those lookups are answered by the interceptor, so a run that appears to measure encrypted resolvers still emits plaintext DNS.
+
+dnsbench avoids this by pinning: every encrypted endpoint in the built-in list carries the resolver's IP address, dials it directly, and uses the hostname only for SNI and certificate validation. No name resolution happens before an encrypted query.
+
+Use `--protocols dot,doh,doh3,doq` to select only encrypted transports. Protocol selection does not exclude hostname-only custom entries, so it is a transport filter rather than a guarantee about their bootstrap lookup.
+
+When an explicitly configured DoH/3 endpoint is not pinned, its hostname is resolved by the HTTP/3 transport with the query context. The same cancellation or deadline that bounds the request therefore also bounds bootstrap resolution.
+
+Pinning fixes the IP for endpoints that would otherwise be selected by the operator's own DNS-based steering. For the anycast addresses that public resolvers publish this is the intended behavior — it is the same address their plaintext and DoT endpoints use — but it means a provider that steers clients to per-region hosts is measured at its published address rather than at whatever host its DNS would have returned for your location.
 
 ## Test zones: setting up your own wildcard zone for the uncached category
 
@@ -152,17 +174,6 @@ The combined `validating` verdict:
 - **unknown** — the checks errored out.
 
 The default test domains live in `internal/probe/config.go` (`Config.SignedDomain`, `Config.BogusDomain`; `Config.UnsignedDomain` is also defined). The CLI does not currently expose flags for them; to change them, edit `probe.DefaultConfig` or pass a custom `probe.Config` when using the probe package as a library.
-
-## Rebinding protection
-
-DNS rebinding attacks use public hostnames that resolve to private addresses to reach devices inside your network. The probe uses the public `sslip.io` service, whose hostnames encode the address they resolve to, and checks whether the server blocks such answers:
-
-- IPv4 (A): `127.0.0.1.sslip.io` → 127.0.0.1, `10.10.10.10.sslip.io` → 10.10.10.10, `172.16.1.1.sslip.io` → 172.16.1.1, `192.168.1.1.sslip.io` → 192.168.1.1
-- IPv6 (AAAA): `--1.sslip.io` → ::1, `fd00--1.sslip.io` → fd00::1
-
-Per case: NXDOMAIN, REFUSED or an empty NOERROR count as **blocked**; an answer containing the expected private address counts as **unprotected**; timeouts and unexpected answers are **undetermined**. Per family the verdict is yes (all determined cases blocked), no (none blocked), or partial; the overall verdict combines v4 and v6.
-
-**Guarantee: only DNS responses are examined.** dnsbench never opens an HTTP, TLS or any other connection to the returned addresses — the check is purely about what the resolver answers, and no traffic is ever sent to 127.0.0.1, 192.168.1.1 or any other resolved address.
 
 ## Modern extensions (optional, outside the ranking)
 
