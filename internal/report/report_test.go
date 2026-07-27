@@ -248,6 +248,29 @@ func TestBuildConclusionsCoverageAndComparisons(t *testing.T) {
 
 func TestExportJSONStripsRawWithoutMutating(t *testing.T) {
 	res := testResult()
+	res.PaceAdjustments = []model.PaceAdjustment{
+		{
+			At:                res.Info.StartedAt.Add(time.Second),
+			Reason:            model.PaceSharedTimeoutBurst,
+			FromInterval:      20 * time.Millisecond,
+			ToInterval:        40 * time.Millisecond,
+			EvidenceStartedAt: res.Info.StartedAt.Add(-time.Second),
+			EvidenceEndedAt:   res.Info.StartedAt,
+			Window:            2 * time.Second,
+			Timeouts:          3,
+			ServerIDs:         []string{"alpha", "beta", "gamma"},
+			FailureDomains:    []string{"Alpha DNS", "Beta DNS", "Gamma DNS"},
+			Categories:        []model.Category{model.CatCached, model.CatTLD},
+			Protocols:         []model.Protocol{model.ProtoUDP, model.ProtoDoH},
+		},
+		{
+			At:           res.Info.StartedAt.Add(10 * time.Second),
+			Reason:       model.PaceCleanAnswerRecovery,
+			FromInterval: 40 * time.Millisecond,
+			ToInterval:   30 * time.Millisecond,
+			CleanAnswers: 50,
+		},
+	}
 	var buf bytes.Buffer
 	if err := ExportJSON(&buf, res, false); err != nil {
 		t.Fatalf("ExportJSON: %v", err)
@@ -258,6 +281,22 @@ func TestExportJSONStripsRawWithoutMutating(t *testing.T) {
 	}
 	if strings.Contains(out, `"samples"`) {
 		t.Fatalf("stripped JSON must not contain samples key")
+	}
+	for _, want := range []string{
+		`"pace_adjustments"`,
+		`"reason": "shared_timeout_burst"`,
+		`"failure_domains"`,
+		`"Alpha DNS"`,
+		`"protocols"`,
+		`"reason": "clean_answer_recovery"`,
+		`"clean_answers": 50`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stripped JSON lost pacing evidence %q:\n%s", want, out)
+		}
+	}
+	if count := strings.Count(out, `"evidence_started_at"`); count != 1 {
+		t.Fatalf("recovery should omit its zero-value evidence timestamp, got %d keys:\n%s", count, out)
 	}
 	if res.Samples == nil || len(res.Samples) != 1 {
 		t.Fatalf("original Samples was mutated")

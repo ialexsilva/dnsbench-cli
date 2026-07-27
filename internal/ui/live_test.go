@@ -451,7 +451,7 @@ func TestLivePaceNoticeWrapsWithIcon(t *testing.T) {
 	l := NewLive(liveServers(), cfg, &bytes.Buffer{}, true, "median")
 	l.width = 40
 	l.height = 16
-	msg := "local congestion — pacing eased 5ms → 10ms (3 timeouts on 3 servers)"
+	msg := "possible shared-path congestion — pace 20ms → 40ms (3 resolver groups timed out in 2s)"
 	l.handle(model.Event{Type: model.EvPaceAdjust, Msg: msg})
 
 	frame := l.renderFrame()

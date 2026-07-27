@@ -20,6 +20,13 @@ func TestDefaultBenchConfigUses200MillisecondTriageThreshold(t *testing.T) {
 	}
 }
 
+func TestDefaultBenchConfigUsesAdaptivePacing(t *testing.T) {
+	cfg := DefaultBenchConfig(ModeStandard)
+	if !cfg.PaceAdaptive || cfg.PaceInterval != 20*time.Millisecond {
+		t.Fatalf("default pacing = %s adaptive=%t, want 20ms adaptive", cfg.PaceInterval, cfg.PaceAdaptive)
+	}
+}
+
 func TestDefaultCachedDomainsAreCuratedTopDomains(t *testing.T) {
 	domains := DefaultCachedDomains()
 	if got := len(domains); got < 50 {

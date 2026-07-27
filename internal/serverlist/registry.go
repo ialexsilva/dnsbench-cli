@@ -23,7 +23,36 @@ func Merge(lists ...[]model.Server) []model.Server {
 			merged = append(merged, s)
 		}
 	}
+	ensureUniqueIDs(merged)
 	return merged
+}
+
+func ensureUniqueIDs(servers []model.Server) {
+	reserved := make(map[string]bool, len(servers))
+	for _, server := range servers {
+		reserved[server.ID] = true
+	}
+	used := make(map[string]bool, len(servers))
+	nextSuffix := make(map[string]int)
+	for i := range servers {
+		base := servers[i].ID
+		if !used[base] {
+			used[base] = true
+			continue
+		}
+		suffix := max(2, nextSuffix[base])
+		for {
+			candidate := fmt.Sprintf("%s-%d", base, suffix)
+			suffix++
+			if used[candidate] || reserved[candidate] {
+				continue
+			}
+			servers[i].ID = candidate
+			used[candidate] = true
+			nextSuffix[base] = suffix
+			break
+		}
+	}
 }
 
 type FilterOptions struct {

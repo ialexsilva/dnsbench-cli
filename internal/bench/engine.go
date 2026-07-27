@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type Engine struct {
 
 	mu           sync.Mutex
 	samples      []model.Sample
+	paceChanges  []model.PaceAdjustment
 	triage       map[string]*model.TriageResult
 	states       map[string]model.ServerState
 	paceMu       sync.Mutex
@@ -48,7 +50,7 @@ func NewEngine(servers []model.Server, cfg model.BenchConfig, factory transport.
 		seed:           seed,
 		canaryInterval: 5 * time.Second,
 		gate:           &pauseGate{},
-		pace:           newPacer(cfg.PaceInterval, seed, cfg.Timeout),
+		pace:           newPacer(cfg.PaceInterval, cfg.PaceAdaptive, seed, cfg.Timeout),
 		slots:          make(chan struct{}, max(1, cfg.Concurrency)),
 		triage:         make(map[string]*model.TriageResult),
 		states:         make(map[string]model.ServerState),
@@ -107,6 +109,21 @@ func (e *Engine) Result() ([]model.Sample, map[string]*model.TriageResult, map[s
 		states[id] = st
 	}
 	return samples, triage, states, e.seed
+}
+
+func (e *Engine) PaceAdjustments() []model.PaceAdjustment {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]model.PaceAdjustment, len(e.paceChanges))
+	for i, adjustment := range e.paceChanges {
+		out[i] = adjustment
+		out[i].ServerIDs = append([]string(nil), adjustment.ServerIDs...)
+		out[i].FailureDomains = append([]string(nil), adjustment.FailureDomains...)
+		out[i].Categories = append([]model.Category(nil), adjustment.Categories...)
+		out[i].Protocols = append([]model.Protocol(nil), adjustment.Protocols...)
+	}
+	slices.SortFunc(out, func(a, b model.PaceAdjustment) int { return a.At.Compare(b.At) })
+	return out
 }
 
 func (e *Engine) Run(ctx context.Context) error {
@@ -206,19 +223,58 @@ func (e *Engine) attemptQuery(ctx context.Context, s model.Server, name string) 
 	return e.singleQuery(ctx, s, name)
 }
 
-func (e *Engine) observePace(ctx context.Context, serverID string, res model.QueryResult) {
-	timedOut := res.Err.IsTimeout()
-	if !timedOut && !res.Answered() {
+func (e *Engine) executeAttempt(ctx context.Context, attempt func() model.QueryResult) (model.QueryResult, bool) {
+	if e.gate.wait(ctx) != nil || !e.acquireSlot(ctx) {
+		return model.QueryResult{}, false
+	}
+	defer e.releaseSlot()
+	if !e.pace.wait(ctx) {
+		return model.QueryResult{}, false
+	}
+	return attempt(), true
+}
+
+func (e *Engine) observePace(
+	ctx context.Context,
+	server model.Server,
+	category model.Category,
+	startedAt time.Time,
+	res model.QueryResult,
+) {
+	adj, changed := e.pace.observeAttempt(server, category, startedAt, res)
+	if !changed {
 		return
 	}
-	adj, changed := e.pace.observe(serverID, timedOut)
-	if !changed || adj.faster {
+	reason := model.PaceSharedTimeoutBurst
+	if adj.recovering {
+		reason = model.PaceCleanAnswerRecovery
+	}
+	change := model.PaceAdjustment{
+		At:                adj.at,
+		Reason:            reason,
+		FromInterval:      adj.from,
+		ToInterval:        adj.to,
+		EvidenceStartedAt: adj.evidenceStartedAt,
+		EvidenceEndedAt:   adj.evidenceEndedAt,
+		Window:            adj.window,
+		Timeouts:          adj.timeouts,
+		ServerIDs:         append([]string(nil), adj.serverIDs...),
+		FailureDomains:    append([]string(nil), adj.failureDomains...),
+		Categories:        append([]model.Category(nil), adj.categories...),
+		Protocols:         append([]model.Protocol(nil), adj.protocols...),
+		CleanAnswers:      adj.cleanAnswers,
+	}
+	e.mu.Lock()
+	e.paceChanges = append(e.paceChanges, change)
+	e.mu.Unlock()
+	if adj.recovering {
 		return
 	}
 	e.emit(ctx, model.Event{
 		Type: model.EvPaceAdjust,
-		Msg: fmt.Sprintf("local congestion — pacing eased %s → %s (%d timeouts on %d servers)",
-			adj.from, adj.to, adj.timeouts, adj.servers),
+		Pace: &change,
+		Msg: fmt.Sprintf("possible shared-path congestion — pace %s → %s (%d resolver groups timed out in %s)",
+			adj.from, adj.to, len(adj.failureDomains), adj.window),
 	})
 }
 

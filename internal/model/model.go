@@ -10,7 +10,7 @@ import (
 
 const (
 	AppName    = "dnsbench"
-	AppVersion = "0.6.0"
+	AppVersion = "0.7.0"
 )
 
 type Protocol string
@@ -630,6 +630,7 @@ type BenchConfig struct {
 	RetryInterval     time.Duration `json:"retry_interval_ns"`
 	Concurrency       int           `json:"concurrency"`
 	PaceInterval      time.Duration `json:"pace_interval_ns"`
+	PaceAdaptive      bool          `json:"pace_adaptive"`
 	PerServerGap      time.Duration `json:"per_server_gap_ns"`
 	Session           SessionMode   `json:"session"`
 	Seed              int64         `json:"seed"`
@@ -657,6 +658,7 @@ func DefaultBenchConfig(m Mode) BenchConfig {
 		RetryInterval:     200 * time.Millisecond,
 		Concurrency:       8,
 		PaceInterval:      20 * time.Millisecond,
+		PaceAdaptive:      true,
 		PerServerGap:      40 * time.Millisecond,
 		Session:           SessionPersistent,
 		TriageEnabled:     true,
@@ -682,13 +684,37 @@ const (
 )
 
 type Event struct {
-	Type     EventType     `json:"type"`
-	ServerID string        `json:"server_id,omitempty"`
-	Round    int           `json:"round,omitempty"`
-	Sample   *Sample       `json:"sample,omitempty"`
-	Triage   *TriageResult `json:"triage,omitempty"`
-	State    ServerState   `json:"state,omitempty"`
-	Msg      string        `json:"msg,omitempty"`
+	Type     EventType       `json:"type"`
+	ServerID string          `json:"server_id,omitempty"`
+	Round    int             `json:"round,omitempty"`
+	Sample   *Sample         `json:"sample,omitempty"`
+	Triage   *TriageResult   `json:"triage,omitempty"`
+	Pace     *PaceAdjustment `json:"pace,omitempty"`
+	State    ServerState     `json:"state,omitempty"`
+	Msg      string          `json:"msg,omitempty"`
+}
+
+type PaceAdjustmentReason string
+
+const (
+	PaceSharedTimeoutBurst  PaceAdjustmentReason = "shared_timeout_burst"
+	PaceCleanAnswerRecovery PaceAdjustmentReason = "clean_answer_recovery"
+)
+
+type PaceAdjustment struct {
+	At                time.Time            `json:"at"`
+	Reason            PaceAdjustmentReason `json:"reason"`
+	FromInterval      time.Duration        `json:"from_interval_ns"`
+	ToInterval        time.Duration        `json:"to_interval_ns"`
+	EvidenceStartedAt time.Time            `json:"evidence_started_at,omitzero"`
+	EvidenceEndedAt   time.Time            `json:"evidence_ended_at,omitzero"`
+	Window            time.Duration        `json:"window_ns,omitempty"`
+	Timeouts          int                  `json:"timeouts,omitempty"`
+	ServerIDs         []string             `json:"server_ids,omitempty"`
+	FailureDomains    []string             `json:"failure_domains,omitempty"`
+	Categories        []Category           `json:"categories,omitempty"`
+	Protocols         []Protocol           `json:"protocols,omitempty"`
+	CleanAnswers      int                  `json:"clean_answers,omitempty"`
 }
 
 type RunInfo struct {
@@ -713,6 +739,7 @@ type RunResult struct {
 	Stats           map[string]*ServerStats  `json:"stats"`
 	Scores          map[RankMode][]Score     `json:"scores"`
 	Comparisons     []Comparison             `json:"comparisons,omitempty"`
+	PaceAdjustments []PaceAdjustment         `json:"pace_adjustments,omitempty"`
 	Samples         []Sample                 `json:"samples,omitempty"`
 }
 

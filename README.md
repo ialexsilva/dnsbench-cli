@@ -101,6 +101,11 @@ it onto your `PATH`, drop the `./` prefix; on Windows use `.\dnsbench.exe`.
 # Benchmark two specific servers, show the detailed table and export reports
 ./dnsbench run --only 1.1.1.1,9.9.9.9 --details --export json,txt --out reports
 
+# Benchmark one-off encrypted endpoints without saving them to the user list
+./dnsbench run \
+  --server https://dns.example/dns-query@192.0.2.1 \
+  --server quic://dns.example@192.0.2.1
+
 # Benchmark and open a shareable HTML report in the browser when the run finishes
 ./dnsbench run --builtin --open
 
@@ -145,7 +150,28 @@ dnsbench speaks six transports: plaintext `udp` and `tcp` on port 53, `dot` (DNS
 
 # Compare just the QUIC-based transports
 ./dnsbench run --protocols doh3,doq
+
+# Compare those built-in transports with the DNS currently used by the system
+./dnsbench run --system --builtin --protocols doh3,doq
 ```
+
+`--protocols` normally filters every selected resolver, which excludes the
+system DNS because operating systems expose it to dnsbench as UDP/53. Explicitly
+selecting `--system` keeps the discovered system resolver(s) in the run
+regardless of that protocol filter. Because source flags define which sources
+participate, add `--builtin`, `--user` or one-off `--server` endpoints for the
+encrypted side of the comparison. `--no-ipv6` and `--only` still apply.
+
+Use repeatable `--server` flags for endpoints that should participate in only
+the current run. The syntax is the same as a text server list: a bare IP address
+for UDP, `tls://hostname@address` for DoT, an HTTPS URL for DoH,
+`h3://hostname/path@address` for DoH/3, or `quic://hostname@address` for DoQ.
+An optional `:port` can follow the address. When at least one `--server` is
+provided without `--system`, `--builtin` or `--user`, the automatic default that
+includes all three sources is disabled, so only the one-off endpoints (and any
+explicit `--servers-file`) enter the run. Pass a source flag to combine that
+source with the one-off endpoints. These entries are never written to the user
+configuration.
 
 This matters if your router intercepts port 53: every plaintext query is then answered by the router rather than by the resolver you meant to measure, and the ranking compares your router against itself.
 
@@ -171,7 +197,7 @@ For a full, shareable report use `--export html`, or `--open`, which writes the 
 
 ## Measurement pacing
 
-During triage and benchmarking, dnsbench spaces query launches globally (`--pace`, default 20ms) and reuses one connected socket per server, so a run does not flood the local Wi-Fi link, NAT router or uplink and then misread the resulting drops as server loss. `--pace` is where the benchmark starts, not a bound: it shortens on clean networks to as little as a quarter of the configured value and, when timeouts appear across several servers at once (the signature of local congestion rather than of any one server), eases off to as much as 8× it and notes the adjustment in the live view. The preceding characterization phase has no launch pacer; its small qualitative workload reuses one persistent session per server and is bounded by `--concurrency`. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details.
+During triage and benchmarking, dnsbench spaces query launches globally and reuses one connected socket per server, so a run does not flood the local Wi-Fi link, NAT router or uplink and then misread the resulting drops as server loss. When `--pace` is omitted, its 20ms default is adaptive but never becomes faster. A burst of launch-correlated timeouts across at least three independent, recently healthy resolver groups signals **possible shared-path congestion** and moves the interval from 20ms to 40ms and then at most 80ms; after the cooldown, clean traffic recovers gradually to 20ms. Endpoints from the same known operator count as one group, as do different protocols on the same address when no operator metadata exists. Passing `--pace DURATION` makes the interval fixed and disables both adaptation and pacing jitter. `--concurrency` remains a separate hard limit on simultaneous attempts and does not set QPS. Adjustment evidence is retained in JSON exports. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details.
 
 While a run is in progress dnsbench also asks the operating system not to enter idle sleep, so leaving the machine unattended (or letting the display turn off) does not suspend the process mid-run and poison the timings. It uses the native mechanism of each platform — `caffeinate` on macOS, a systemd-logind idle inhibitor lock held over D-Bus on Linux, and `SetThreadExecutionState` on Windows.
 

@@ -22,6 +22,31 @@ func TestRunCommandModernDefaults(t *testing.T) {
 	if got := cmd.Flags().Lookup("triage-threshold").DefValue; got != "200ms" {
 		t.Fatalf("--triage-threshold default = %q, want 200ms", got)
 	}
+	if got := cmd.Flags().Lookup("concurrency").Usage; !strings.Contains(got, "hard limit") || !strings.Contains(got, "does not control QPS") {
+		t.Fatalf("--concurrency help does not separate in-flight queries from QPS: %q", got)
+	}
+	if got := cmd.Flags().Lookup("pace").Usage; !strings.Contains(got, "fixed minimum interval") || !strings.Contains(got, "when omitted") {
+		t.Fatalf("--pace help does not distinguish fixed and adaptive behavior: %q", got)
+	}
+}
+
+func TestBuildBenchConfigMakesExplicitPaceFixed(t *testing.T) {
+	base := model.DefaultBenchConfig(model.ModeStandard)
+	flags := runFlags{
+		pace:         30 * time.Millisecond,
+		paceExplicit: true,
+	}
+	cfg, _ := buildBenchConfig(&flags, model.ModeStandard, model.SessionPersistent)
+	if cfg.PaceInterval != 30*time.Millisecond || cfg.PaceAdaptive {
+		t.Fatalf("explicit pacing = %s adaptive=%t, want fixed 30ms", cfg.PaceInterval, cfg.PaceAdaptive)
+	}
+
+	flags.pace = base.PaceInterval
+	flags.paceExplicit = false
+	cfg, _ = buildBenchConfig(&flags, model.ModeStandard, model.SessionPersistent)
+	if cfg.PaceInterval != base.PaceInterval || !cfg.PaceAdaptive {
+		t.Fatalf("default pacing = %s adaptive=%t, want adaptive %s", cfg.PaceInterval, cfg.PaceAdaptive, base.PaceInterval)
+	}
 }
 
 func TestProbeCommandHasNoPacingFlag(t *testing.T) {
