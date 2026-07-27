@@ -64,13 +64,12 @@ func (e *Engine) runRound(ctx context.Context, active []model.Server, round int,
 	var mu sync.Mutex
 	total, timeouts := 0, 0
 	for pos, idx := range order {
-		if !e.acquireSlot(ctx) {
+		if ctx.Err() != nil {
 			break
 		}
 		wg.Add(1)
 		go func(pos, idx int) {
 			defer wg.Done()
-			defer e.releaseSlot()
 			t, to := e.runServerRound(ctx, active[idx], idx, pos, round, warmup, seq)
 			mu.Lock()
 			total += t
@@ -104,14 +103,10 @@ func (e *Engine) runServerRound(ctx context.Context, s model.Server, stableIdx, 
 		if !e.waitServerGap(ctx, s.ID) {
 			return total, timeouts
 		}
-		if e.gate.wait(ctx) != nil {
+		sample, started := e.measure(ctx, s, cat, round, warmup, qname)
+		if !started {
 			return total, timeouts
 		}
-		if !e.pace.wait(ctx) {
-			return total, timeouts
-		}
-		e.emit(ctx, model.Event{Type: model.EvQueryStart, ServerID: s.ID, Round: round})
-		sample := e.measure(ctx, s, cat, round, warmup, qname)
 		e.markServerQueryDone(s.ID)
 		if sample.Result.Err != nil && (sample.Result.Err.Kind == model.ErrCanceled || ctx.Err() != nil) {
 			return total, timeouts
@@ -154,8 +149,8 @@ func randomLabel(rng *rand.Rand) string {
 	return string(b)
 }
 
-func (e *Engine) measure(ctx context.Context, s model.Server, cat model.Category, round int, warmup bool, qname string) model.Sample {
-	startedAt := time.Now()
+func (e *Engine) measure(ctx context.Context, s model.Server, cat model.Category, round int, warmup bool, qname string) (model.Sample, bool) {
+	var startedAt time.Time
 	sample := model.Sample{
 		ServerID: s.ID,
 		Category: cat,
@@ -163,7 +158,6 @@ func (e *Engine) measure(ctx context.Context, s model.Server, cat model.Category
 		Warmup:   warmup,
 		QName:    qname,
 		QType:    "A",
-		At:       startedAt,
 	}
 	retries := e.cfg.Retries
 	if retries < 0 {
@@ -175,12 +169,24 @@ func (e *Engine) measure(ctx context.Context, s model.Server, cat model.Category
 			if !sleepCtx(ctx, e.cfg.RetryInterval) {
 				break
 			}
-			if !e.pace.wait(ctx) {
-				break
-			}
 		}
-		res = e.attemptQuery(ctx, s, qname)
-		e.observePace(ctx, s.ID, res)
+		var attemptStartedAt time.Time
+		attemptResult, executed := e.executeAttempt(ctx, func() model.QueryResult {
+			if startedAt.IsZero() {
+				e.emit(ctx, model.Event{Type: model.EvQueryStart, ServerID: s.ID, Round: round})
+				attemptStartedAt = time.Now()
+				startedAt = attemptStartedAt
+				sample.At = startedAt
+			} else {
+				attemptStartedAt = time.Now()
+			}
+			return e.attemptQuery(ctx, s, qname)
+		})
+		if !executed {
+			break
+		}
+		res = attemptResult
+		e.observePace(ctx, s, cat, attemptStartedAt, res)
 		sample.Attempts++
 		if !res.Answered() {
 			sample.FailedAttempts++
@@ -192,7 +198,10 @@ func (e *Engine) measure(ctx context.Context, s model.Server, cat model.Category
 			break
 		}
 	}
+	if startedAt.IsZero() {
+		return sample, false
+	}
 	sample.Elapsed = time.Since(startedAt)
 	sample.Result = res
-	return sample
+	return sample, true
 }

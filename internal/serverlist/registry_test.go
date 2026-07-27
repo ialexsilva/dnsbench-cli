@@ -1,6 +1,7 @@
 package serverlist
 
 import (
+	"slices"
 	"testing"
 
 	"dnsbench/internal/model"
@@ -37,6 +38,27 @@ func TestMergeDistinguishesProtocolAndPort(t *testing.T) {
 	merged := Merge([]model.Server{a, b, c})
 	if len(merged) != 3 {
 		t.Fatalf("got %d servers, want 3", len(merged))
+	}
+}
+
+func TestMergeAssignsUniqueIDsToDistinctEndpoints(t *testing.T) {
+	merged := Merge([]model.Server{
+		udpServer("resolver", "1.1.1.1"),
+		{ID: "resolver", Protocol: model.ProtoUDP, Address: "1.1.1.1", Port: 5353, Enabled: true},
+		udpServer("resolver-2", "9.9.9.9"),
+		{ID: "doh", Protocol: model.ProtoDoH, DoHURL: "https://dns.example/dns-query", Address: "192.0.2.1", Enabled: true},
+		{ID: "doh", Protocol: model.ProtoDoH, DoHURL: "https://dns.example/dns-query", Address: "192.0.2.2", Enabled: true},
+	})
+	if len(merged) != 5 {
+		t.Fatalf("got %d servers, want 5", len(merged))
+	}
+	got := make([]string, len(merged))
+	for i, server := range merged {
+		got[i] = server.ID
+	}
+	want := []string{"resolver", "resolver-3", "resolver-2", "doh", "doh-2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("IDs = %q, want %q", got, want)
 	}
 }
 

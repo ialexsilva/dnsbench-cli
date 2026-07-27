@@ -25,6 +25,7 @@ type selectionFlags struct {
 	system      bool
 	builtin     bool
 	user        bool
+	servers     []string
 	only        []string
 	serversFile string
 	noIPv6      bool
@@ -32,9 +33,10 @@ type selectionFlags struct {
 }
 
 func registerSelectionFlags(cmd *cobra.Command, sel *selectionFlags) {
-	cmd.Flags().BoolVar(&sel.system, "system", false, "include the system-configured DNS resolvers")
+	cmd.Flags().BoolVar(&sel.system, "system", false, "include the system-configured DNS resolvers, even when excluded by --protocols")
 	cmd.Flags().BoolVar(&sel.builtin, "builtin", false, "include the built-in public DNS resolvers")
 	cmd.Flags().BoolVar(&sel.user, "user", false, "include the user resolver list")
+	cmd.Flags().StringArrayVar(&sel.servers, "server", nil, "one-off resolver endpoint (IP, tls://, https://, h3:// or quic://); repeat to add more")
 	cmd.Flags().StringSliceVar(&sel.only, "only", nil, "restrict to resolvers matching these IDs or addresses")
 	cmd.Flags().StringVar(&sel.serversFile, "servers-file", "", "extra resolver list file to include (.json, .csv or .txt)")
 	cmd.Flags().BoolVar(&sel.noIPv6, "no-ipv6", false, "exclude resolvers with IPv6 addresses")
@@ -50,13 +52,28 @@ type selectedServers struct {
 }
 
 func selectServers(ctx context.Context, sel selectionFlags) (selectedServers, error) {
+	return selectServersWithDiscovery(ctx, sel, sysdns.Discover)
+}
+
+func selectServersWithDiscovery(
+	ctx context.Context,
+	sel selectionFlags,
+	discover func(context.Context) ([]model.Server, []string, []string, error),
+) (selectedServers, error) {
 	var out selectedServers
 	includeSystem, includeBuiltin, includeUser := sel.system, sel.builtin, sel.user
-	if !includeSystem && !includeBuiltin && !includeUser {
+	if !includeSystem && !includeBuiltin && !includeUser && len(sel.servers) == 0 {
 		includeSystem, includeBuiltin, includeUser = true, true, true
 	}
 	var lists [][]model.Server
-	system, ifaces, warnings, discoverErr := sysdns.Discover(ctx)
+	if len(sel.servers) > 0 {
+		inline, err := parseInlineServers(sel.servers)
+		if err != nil {
+			return out, err
+		}
+		lists = append(lists, inline)
+	}
+	system, ifaces, warnings, discoverErr := discover(ctx)
 	if discoverErr != nil {
 		out.warnings = append(out.warnings, "system DNS discovery failed: "+discoverErr.Error())
 	} else {
@@ -89,16 +106,58 @@ func selectServers(ctx context.Context, sel selectionFlags) (selectedServers, er
 	if err != nil {
 		return out, err
 	}
-	servers = serverlist.Filter(servers, serverlist.FilterOptions{
-		Protocols: protos,
-		IPv4Only:  sel.noIPv6,
-	})
+	servers = filterSelectedServers(servers, out.systemServers, protos, sel.noIPv6, sel.system)
 	if len(sel.only) > 0 {
 		servers = filterOnly(servers, sel.only)
 	}
 	out.systemIDs = matchSystemServerIDs(servers, out.systemServers)
 	out.servers = servers
 	return out, nil
+}
+
+func filterSelectedServers(servers, system []model.Server, protocols []model.Protocol, ipv4Only, keepSystem bool) []model.Server {
+	systemKeys := make(map[string]bool, len(system))
+	if keepSystem {
+		for _, server := range system {
+			systemKeys[server.Key()] = true
+		}
+	}
+	out := make([]model.Server, 0, len(servers))
+	for _, server := range servers {
+		if ipv4Only && server.IsIPv6() {
+			continue
+		}
+		protocolMatches := len(protocols) == 0 || slices.Contains(protocols, server.Protocol)
+		if !protocolMatches && !systemKeys[server.Key()] {
+			continue
+		}
+		out = append(out, server)
+	}
+	return out
+}
+
+func parseInlineServers(entries []string) ([]model.Server, error) {
+	servers := make([]model.Server, 0, len(entries))
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			return nil, usageErrorf("--server requires a non-empty endpoint")
+		}
+		decoded, err := serverlist.DecodeText([]byte(entry))
+		if err != nil {
+			return nil, usageErrorf("invalid --server value %q: %v", raw, err)
+		}
+		if len(decoded) != 1 {
+			return nil, usageErrorf("--server value %q must contain exactly one endpoint", raw)
+		}
+		server := decoded[0]
+		server.Source = model.SourceUser
+		if err := serverlist.ValidateAndPrepare(&server); err != nil {
+			return nil, usageErrorf("invalid --server value %q: %v", raw, err)
+		}
+		servers = append(servers, server)
+	}
+	return servers, nil
 }
 
 func matchSystemServerIDs(selected, system []model.Server) []string {

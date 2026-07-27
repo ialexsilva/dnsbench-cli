@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"dnsbench/internal/model"
 )
@@ -40,9 +41,6 @@ func (e *Engine) runTriage(ctx context.Context) ([]model.Server, error) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if e.acquireSlot(ctx) {
-				defer e.releaseSlot()
-			}
 			results[i] = e.triageServer(ctx, e.servers[i])
 		}(i)
 	}
@@ -73,16 +71,21 @@ func (e *Engine) triageServer(ctx context.Context, s model.Server) *model.Triage
 	if attempts < 1 {
 		attempts = 1
 	}
-	e.emit(ctx, model.Event{Type: model.EvQueryStart, ServerID: s.ID})
+	started := false
 	for i := 0; i < attempts; i++ {
-		if e.gate.wait(ctx) != nil {
+		var attemptStartedAt time.Time
+		res, executed := e.executeAttempt(ctx, func() model.QueryResult {
+			if !started {
+				e.emit(ctx, model.Event{Type: model.EvQueryStart, ServerID: s.ID})
+				started = true
+			}
+			attemptStartedAt = time.Now()
+			return e.singleQuery(ctx, s, domain)
+		})
+		if !executed {
 			break
 		}
-		if !e.pace.wait(ctx) {
-			break
-		}
-		res := e.singleQuery(ctx, s, domain)
-		e.observePace(ctx, s.ID, res)
+		e.observePace(ctx, s, model.CatCached, attemptStartedAt, res)
 		if res.Err != nil && res.Err.Kind == model.ErrCanceled {
 			break
 		}

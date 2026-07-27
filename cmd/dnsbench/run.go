@@ -41,6 +41,7 @@ type runFlags struct {
 	retryInterval   time.Duration
 	concurrency     int
 	pace            time.Duration
+	paceExplicit    bool
 	gap             time.Duration
 	session         string
 	seed            int64
@@ -74,6 +75,7 @@ time of day.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f.rounds = mustInt(cmd, "rounds")
+			f.paceExplicit = cmd.Flags().Changed("pace")
 			return executeRun(cmd, &f)
 		},
 	}
@@ -90,8 +92,8 @@ time of day.`,
 	cmd.Flags().DurationVar(&f.timeout, "timeout", base.Timeout, "timeout per query")
 	cmd.Flags().IntVar(&f.retries, "retries", base.Retries, "retries per failed query")
 	cmd.Flags().DurationVar(&f.retryInterval, "retry-interval", base.RetryInterval, "wait between retries")
-	cmd.Flags().IntVar(&f.concurrency, "concurrency", base.Concurrency, "maximum queries in flight at once")
-	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "starting spacing between any two query launches, across all resolvers; adapts between a quarter of it and 8x it (0 disables pacing)")
+	cmd.Flags().IntVar(&f.concurrency, "concurrency", base.Concurrency, "hard limit on simultaneous DNS queries; does not control QPS")
+	cmd.Flags().DurationVar(&f.pace, "pace", base.PaceInterval, "fixed minimum interval between query starts across all resolvers; when omitted, the 20ms default adapts up to 4x on possible shared-path congestion (0 disables pacing)")
 	cmd.Flags().DurationVar(&f.gap, "gap", base.PerServerGap, "gap between consecutive queries to the same resolver")
 	cmd.Flags().StringVar(&f.session, "session", string(base.Session), "connection reuse: cold or persistent")
 	cmd.Flags().Int64Var(&f.seed, "seed", 0, "random seed (0 picks a random seed)")
@@ -240,6 +242,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 		Stats:           statsMap,
 		Scores:          scores,
 		Samples:         samples,
+		PaceAdjustments: engine.PaceAdjustments(),
 	}
 	res.Comparisons = buildComparisons(res, rankingMode)
 	exportPaths, exportErr := writeExportFiles(res, f, rankingMode)
@@ -389,6 +392,7 @@ func buildBenchConfig(f *runFlags, mode model.Mode, session model.SessionMode) (
 	cfg.RetryInterval = f.retryInterval
 	cfg.Concurrency = f.concurrency
 	cfg.PaceInterval = f.pace
+	cfg.PaceAdaptive = !f.paceExplicit && f.pace > 0
 	cfg.PerServerGap = f.gap
 	cfg.Session = session
 	cfg.Seed = f.seed

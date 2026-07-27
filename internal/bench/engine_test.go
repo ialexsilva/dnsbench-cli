@@ -284,7 +284,7 @@ func TestTriageRejectsSemanticallyInvalidDNSResponses(t *testing.T) {
 	}
 }
 
-func TestDeterministicShufflingWithFixedSeed(t *testing.T) {
+func TestDeterministicQueryPlanWithFixedSeed(t *testing.T) {
 	runOnce := func() []string {
 		f := newFakeFactory()
 		cfg := testConfig()
@@ -307,6 +307,7 @@ func TestDeterministicShufflingWithFixedSeed(t *testing.T) {
 			s := ev.Sample
 			seq = append(seq, fmt.Sprintf("%d|%t|%s|%s|%s", s.Round, s.Warmup, s.ServerID, s.Category, s.QName))
 		}
+		slices.Sort(seq)
 		return seq
 	}
 	first := runOnce()
@@ -483,6 +484,78 @@ func TestPersistentSessionCreatesOneQuerierPerServer(t *testing.T) {
 	}
 }
 
+func TestConcurrencyCapsActualQueryAttempts(t *testing.T) {
+	f := newFakeFactory()
+	var inFlight atomic.Int32
+	var peak atomic.Int32
+	track := func(_ context.Context, _ int, _ transport.Question) model.QueryResult {
+		current := inFlight.Add(1)
+		for {
+			seen := peak.Load()
+			if current <= seen || peak.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+		inFlight.Add(-1)
+		return okResult(time.Millisecond)
+	}
+	ids := []string{"s1", "s2", "s3", "s4", "s5", "s6"}
+	for _, id := range ids {
+		f.script(id, track)
+	}
+	cfg := testConfig()
+	cfg.TriageEnabled = false
+	cfg.WarmupRounds = 0
+	cfg.Rounds = 1
+	cfg.Categories = []model.Category{model.CatCached}
+	cfg.Concurrency = 2
+	cfg.PaceInterval = 0
+	cfg.PerServerGap = 0
+	e := NewEngine(testServers(ids...), cfg, f.factory)
+	if _, err := runEngine(t, e, context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if got := peak.Load(); got != int32(cfg.Concurrency) {
+		t.Fatalf("peak in-flight queries = %d, want %d", got, cfg.Concurrency)
+	}
+}
+
+func TestConcurrencySlotIsReleasedDuringPerServerGap(t *testing.T) {
+	f := newFakeFactory()
+	var mu sync.Mutex
+	var order []string
+	for _, id := range []string{"s1", "s2"} {
+		id := id
+		f.script(id, func(_ context.Context, _ int, _ transport.Question) model.QueryResult {
+			mu.Lock()
+			order = append(order, id)
+			mu.Unlock()
+			return okResult(time.Millisecond)
+		})
+	}
+	cfg := testConfig()
+	cfg.TriageEnabled = false
+	cfg.WarmupRounds = 0
+	cfg.Rounds = 1
+	cfg.Categories = []model.Category{model.CatCached, model.CatTLD}
+	cfg.Concurrency = 1
+	cfg.PaceInterval = 0
+	cfg.PerServerGap = 50 * time.Millisecond
+	e := NewEngine(testServers("s1", "s2"), cfg, f.factory)
+	if _, err := runEngine(t, e, context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 4 {
+		t.Fatalf("query order = %v, want four attempts", order)
+	}
+	if order[0] == order[1] {
+		t.Fatalf("query order = %v; concurrency slot stayed with one server during its gap", order)
+	}
+}
+
 func TestColdSessionCreatesOneQuerierPerQuery(t *testing.T) {
 	f := newFakeFactory()
 	cfg := testConfig()
@@ -531,6 +604,43 @@ func TestMeasureRecordsEndToEndRetryCost(t *testing.T) {
 	}
 	if sample.Elapsed < cfg.RetryInterval {
 		t.Errorf("Elapsed = %s, want at least retry interval %s", sample.Elapsed, cfg.RetryInterval)
+	}
+}
+
+func TestCancellationDuringRetryAdmissionDoesNotRecordAnAnsweredSample(t *testing.T) {
+	f := newFakeFactory()
+	firstFailure := make(chan struct{})
+	var e *Engine
+	f.script("s1", func(_ context.Context, n int, _ transport.Question) model.QueryResult {
+		if n == 0 {
+			e.Pause()
+			close(firstFailure)
+		}
+		return networkResult("temporary failure")
+	})
+	cfg := testConfig()
+	cfg.TriageEnabled = false
+	cfg.WarmupRounds = 0
+	cfg.Rounds = 1
+	cfg.Categories = []model.Category{model.CatCached}
+	cfg.Retries = 1
+	cfg.RetryInterval = 0
+	cfg.PaceInterval = 0
+	cfg.PerServerGap = 0
+	e = NewEngine(testServers("s1"), cfg, f.factory)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-firstFailure
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := runEngine(t, e, ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	samples, _, _, _ := e.Result()
+	if len(samples) != 0 {
+		t.Fatalf("samples = %+v, want no fabricated partial sample", samples)
 	}
 }
 
