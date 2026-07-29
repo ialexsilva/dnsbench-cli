@@ -5,7 +5,13 @@ on:
     branches: [main]
   push:
     branches: [main]
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to test
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,6 +24,8 @@ jobs:
     steps:
       - name: Check Out Repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set Up Go
         uses: actions/setup-go@v5

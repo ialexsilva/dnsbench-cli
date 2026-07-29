@@ -1,30 +1,65 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [Test]
-    types: [completed]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build or repair
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    outputs:
+      tag: ${{ steps.tag.outputs.name }}
+    steps:
+      - name: Validate Tag Name
+        id: tag
+        shell: bash
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag: $TAG_NAME"
+            exit 1
+          fi
+          echo "name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Tag Exists
+        run: gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG_NAME" --silent
+
+  test:
+    name: Test Release
+    needs: validate
+    uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ needs.validate.outputs.tag }}
+
   release:
     name: Build and Publish Release
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    needs: [validate, test]
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     env:
-      TAG_NAME: ${{ github.event.workflow_run.head_branch }}
-      TARGET_COMMITISH: ${{ github.event.workflow_run.head_sha }}
-
+      TAG_NAME: ${{ needs.validate.outputs.tag }}
     steps:
       - name: Check Out Repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ env.TAG_NAME }}
 
       - name: Set Up Go
         uses: actions/setup-go@v5
@@ -50,4 +85,60 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$TAG_NAME" dist/* --target "$TARGET_COMMITISH" --generate-notes
+        shell: bash
+        run: |
+          if ! gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes
+            exit 0
+          fi
+
+          if [[ "$(gh release view "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isImmutable \
+            --jq '.isImmutable')" == "true" ]]; then
+            echo "::error::Release $TAG_NAME is immutable; missing assets cannot be uploaded."
+            exit 1
+          fi
+
+          existing_assets="$(gh release view "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name')"
+
+          asset_exists() {
+            local expected="$1"
+            local existing
+            while IFS= read -r existing; do
+              [[ "$existing" == "$expected" ]] && return 0
+            done <<< "$existing_assets"
+            return 1
+          }
+
+          missing_assets=()
+          for asset in dist/*; do
+            asset_name="${asset##*/}"
+            if asset_exists "$asset_name"; then
+              echo "Asset already exists: $asset_name"
+            else
+              missing_assets+=("$asset")
+            fi
+          done
+
+          if (( ${#missing_assets[@]} > 0 )); then
+            gh release upload "$TAG_NAME" "${missing_assets[@]}" \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            echo "All release assets already exist."
+          fi
+
+          if [[ "$(gh release view "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft')" == "true" ]]; then
+            gh release edit "$TAG_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft=false
+          fi
