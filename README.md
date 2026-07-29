@@ -138,7 +138,7 @@ Keep the network idle during a run: downloads, streaming and calls distort the n
 
 Global flags: `--no-color` disables colored output; `-v, --version` prints the version. Run `dnsbench <command> --help` for the full flag list of each command.
 
-The built-in list ships 57 public resolver endpoints (UDP, DoT, DoH, DoH/3 and DoQ) from operators including Google Public DNS, Cloudflare, Quad9, OpenDNS, AdGuard DNS, CleanBrowsing, Control D, Mullvad DNS and NextDNS. The user list is stored as `servers.json` under your OS user config directory (for example `~/Library/Application Support/dnsbench` on macOS, `~/.config/dnsbench` on Linux, `%AppData%\dnsbench` on Windows).
+The built-in list ships 58 public resolver endpoints (UDP, DoT, DoH, DoH/3 and DoQ) from operators including Google Public DNS, Cloudflare, Quad9, OpenDNS, AdGuard DNS, CleanBrowsing, Control D, Mullvad DNS and NextDNS. The user list is stored as `servers.json` under your OS user config directory (for example `~/Library/Application Support/dnsbench` on macOS, `~/.config/dnsbench` on Linux, `%AppData%\dnsbench` on Windows).
 
 ## Transports
 

@@ -482,6 +482,18 @@
     "enabled": true
   },
   {
+    "id": "controld-dot",
+    "name": "Control D p1 (DoT)",
+    "operator": "Control D",
+    "address": "76.76.2.11",
+    "port": 853,
+    "tls_hostname": "p1.freedns.controld.com",
+    "protocol": "dot",
+    "notes": "Blocks malware (p1 profile)",
+    "source": "builtin",
+    "enabled": true
+  },
+  {
     "id": "controld-doh",
     "name": "Control D p1 (DoH)",
     "operator": "Control D",

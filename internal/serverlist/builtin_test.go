@@ -3,6 +3,7 @@ package serverlist
 import (
 	"net/netip"
 	"net/url"
+	"strings"
 	"testing"
 
 	"dnsbench/internal/model"
@@ -80,11 +81,46 @@ func TestBuiltinMullvadProtocols(t *testing.T) {
 	}
 }
 
+func TestBuiltinControlDUsesMalwareProfile(t *testing.T) {
+	addresses := map[string]bool{
+		"76.76.2.1":      true,
+		"76.76.10.1":     true,
+		"2606:1a40::1":   true,
+		"2606:1a40:1::1": true,
+		"76.76.2.11":     true,
+	}
+	got := make(map[model.Protocol]int)
+	for _, s := range Builtin() {
+		if s.Operator != "Control D" {
+			continue
+		}
+		got[s.Protocol]++
+		if !addresses[s.Address] {
+			t.Errorf("Control D server %q uses address %q, which is not a p1 endpoint", s.ID, s.Address)
+		}
+		if strings.Contains(s.DoHURL, "/p0") {
+			t.Errorf("Control D server %q still points at the unfiltered p0 profile: %q", s.ID, s.DoHURL)
+		}
+		if strings.HasPrefix(s.TLSHostname, "p0.") {
+			t.Errorf("Control D server %q still points at the unfiltered p0 profile: %q", s.ID, s.TLSHostname)
+		}
+	}
+
+	want := []model.Protocol{model.ProtoDoT, model.ProtoDoH, model.ProtoDoH3, model.ProtoDoQ}
+	for _, protocol := range want {
+		if got[protocol] != 1 {
+			t.Errorf("Control D %s endpoints = %d, want 1", protocol.Label(), got[protocol])
+		}
+	}
+	if got[model.ProtoUDP] != 4 {
+		t.Errorf("Control D UDP endpoints = %d, want 4", got[model.ProtoUDP])
+	}
+}
+
 func TestBuiltinExcludesKnownUnreachableEndpoints(t *testing.T) {
 	excluded := map[string]bool{
 		"adguard-udp6-ad1": true,
 		"adguard-udp6-ad2": true,
-		"controld-dot":     true,
 		"dns0-udp4-81":     true,
 		"dns0-udp4-5":      true,
 		"dns0-udp6-fc80":   true,
