@@ -24,6 +24,9 @@ func ExportText(w io.Writer, res *model.RunResult) error {
 	cfg := res.Config
 	fmt.Fprintf(&b, "Configuration: mode %s, %d rounds, categories %s, timeout %s, session %s, seed %d\n",
 		cfg.Mode, cfg.Rounds, categoryList(cfg.Categories), cfg.Timeout, cfg.Session, cfg.Seed)
+	if cfg.NoDNSSEC {
+		b.WriteString("DNSSEC checks and penalty disabled (--no-dnssec).\n")
+	}
 	sel := selectedMode(res)
 	fmt.Fprintf(&b, "Ranking mode: %s\n", sel.Label())
 	b.WriteString("Latency cost: weighted latency plus penalties, in ms — lower is better\n")

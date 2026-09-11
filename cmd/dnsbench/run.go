@@ -29,6 +29,7 @@ import (
 type runFlags struct {
 	sel             selectionFlags
 	skipProbe       bool
+	noDNSSEC        bool
 	extended        bool
 	mode            string
 	rounds          int
@@ -82,6 +83,7 @@ time of day.`,
 	registerSelectionFlags(cmd, &f.sel)
 	base := model.DefaultBenchConfig(model.ModeStandard)
 	cmd.Flags().BoolVar(&f.skipProbe, "skip-probe", false, "skip the characterization phase")
+	cmd.Flags().BoolVar(&f.noDNSSEC, "no-dnssec", false, "skip DNSSEC checks and remove the DNSSEC penalty from all rankings")
 	cmd.Flags().BoolVar(&f.extended, "extended", false, "run extended probe checks (DNS64, QNAME minimization, HTTPS records)")
 	cmd.Flags().StringVar(&f.mode, "mode", string(model.ModeStandard), "benchmark mode: quick, standard, precise or custom")
 	cmd.Flags().Int("rounds", 0, "rounds per category (overrides the mode; required with --mode custom)")
@@ -153,7 +155,7 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 	if !f.quiet {
 		printForwarderNotes(out, systemServers(selection))
 	}
-	weights, err := loadWeights(f.weightsFile)
+	weights, err := loadRunWeights(f)
 	if err != nil {
 		return err
 	}
@@ -170,7 +172,11 @@ func executeRun(cmd *cobra.Command, f *runFlags) error {
 		var spinner *ui.Spinner
 		if !f.quiet {
 			fmt.Fprintln(out)
-			label := fmt.Sprintf("Characterizing %s — DNSSEC, NXDOMAIN", countNoun(len(selection.servers), "resolver"))
+			checks := "DNSSEC, NXDOMAIN"
+			if f.noDNSSEC {
+				checks = "NXDOMAIN"
+			}
+			label := fmt.Sprintf("Characterizing %s — %s", countNoun(len(selection.servers), "resolver"), checks)
 			spinner = ui.NewSpinner(out, stdoutIsTTY(), label, len(selection.servers))
 			spinner.Start()
 		}
@@ -355,6 +361,7 @@ func systemServers(selection selectedServers) []model.Server {
 func runProbePhase(ctx context.Context, servers []model.Server, f *runFlags, onResult func()) map[string]*model.ProbeResult {
 	cfg := probe.DefaultConfig()
 	cfg.Extended = f.extended
+	cfg.SkipDNSSEC = f.noDNSSEC
 	cfg.UncachedZone = f.uncachedZone
 	cfg.OnResult = onResult
 	if f.timeout > 0 {
@@ -368,6 +375,7 @@ func runProbePhase(ctx context.Context, servers []model.Server, f *runFlags, onR
 
 func buildBenchConfig(f *runFlags, mode model.Mode, session model.SessionMode) (model.BenchConfig, []string) {
 	cfg := model.DefaultBenchConfig(mode)
+	cfg.NoDNSSEC = f.noDNSSEC
 	var notices []string
 	if f.rounds > 0 {
 		cfg.Rounds = f.rounds
@@ -401,6 +409,20 @@ func buildBenchConfig(f *runFlags, mode model.Mode, session model.SessionMode) (
 	cfg.TriageThreshold = f.triageThreshold
 	cfg.ForceAll = f.forceAll
 	return cfg, notices
+}
+
+func loadRunWeights(f *runFlags) (map[model.RankMode]model.Weights, error) {
+	weights, err := loadWeights(f.weightsFile)
+	if err != nil {
+		return nil, err
+	}
+	if f.noDNSSEC {
+		for mode, w := range weights {
+			w.PenaltyNoDNSSECMs = 0
+			weights[mode] = w
+		}
+	}
+	return weights, nil
 }
 
 func loadWeights(path string) (map[model.RankMode]model.Weights, error) {

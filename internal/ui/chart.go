@@ -16,6 +16,9 @@ const (
 
 func RenderRunSummary(res *model.RunResult) string {
 	parts := []string{fmt.Sprintf("%d resolvers", len(res.Servers))}
+	if res.Config.NoDNSSEC {
+		parts = append(parts, "DNSSEC checks and penalty disabled")
+	}
 	if res.Config.Mode != "" {
 		parts = append(parts, string(res.Config.Mode)+" mode")
 	}

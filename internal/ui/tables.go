@@ -186,6 +186,9 @@ func dnssecCell(p *model.ProbeResult) string {
 	if p == nil {
 		return "?"
 	}
+	if p.DNSSEC.Skipped {
+		return "skipped"
+	}
 	return coloredVerdict(p.DNSSEC.Validating)
 }
 

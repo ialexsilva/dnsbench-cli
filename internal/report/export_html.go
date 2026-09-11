@@ -432,6 +432,9 @@ func statusDotCell(v model.Verdict, goodWhenYes bool, yesLabel, noLabel string) 
 
 func writeHTMLCharacteristics(b *strings.Builder, res *model.RunResult) {
 	b.WriteString("<section>\n<h2>Server characteristics</h2>\n")
+	if res.Config.NoDNSSEC {
+		b.WriteString("<p class=\"tablenote\">DNSSEC checks and penalty disabled (--no-dnssec).</p>\n")
+	}
 	b.WriteString("<div class=\"tablewrap\"><table>\n<thead><tr><th>resolver</th><th>protocol</th><th>status</th><th>dnssec validation</th><th>nxdomain honesty</th></tr></thead>\n<tbody>\n")
 	for i := range res.Servers {
 		s := &res.Servers[i]
@@ -449,6 +452,9 @@ func writeHTMLCharacteristics(b *strings.Builder, res *model.RunResult) {
 		dnssec, nx := "<span class=\"dot off\"></span>not probed", "<span class=\"dot off\"></span>not probed"
 		if p != nil {
 			dnssec = statusDotCell(p.DNSSEC.Validating, true, "validating", "not validating")
+			if p.DNSSEC.Skipped {
+				dnssec = "<span class=\"dot off\"></span>skipped"
+			}
 			nx = statusDotCell(p.NXInterception, false, "intercepts", "honest")
 		}
 		fmt.Fprintf(b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",

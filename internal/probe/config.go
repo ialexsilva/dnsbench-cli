@@ -17,6 +17,7 @@ type Config struct {
 	Retries            int
 	Concurrency        int
 	Extended           bool
+	SkipDNSSEC         bool
 	Factory            transport.Factory
 	OnResult           func()
 }
