@@ -16,6 +16,7 @@ var csvColumns = []string{
 	"p50_ms", "p90_ms", "p95_ms", "p99_ms", "ci95_low_ms", "ci95_high_ms",
 	"jitter_ms", "servfail_pct", "invalid_pct", "truncated_pct",
 	"ranking_mode", "rank", "cost_base_ms", "cost_penalty_ms", "latency_cost_ms",
+	"dnssec_validation",
 }
 
 func ExportCSV(w io.Writer, res *model.RunResult) error {
@@ -55,6 +56,14 @@ func ExportCSV(w io.Writer, res *model.RunResult) error {
 				csvFloat(d.JitterMs), csvFloat(d.ServfailPct), csvFloat(d.InvalidPct), csvFloat(d.TruncatedPct),
 			}
 			row = append(row, csvRanking(scores, modeCell, s.ID)...)
+			dnssec := "not probed"
+			if p := res.Probes[s.ID]; p != nil {
+				dnssec = string(p.DNSSEC.Validating)
+				if p.DNSSEC.Skipped {
+					dnssec = "skipped"
+				}
+			}
+			row = append(row, dnssec)
 			if err := cw.Write(row); err != nil {
 				return err
 			}

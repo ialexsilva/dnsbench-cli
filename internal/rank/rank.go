@@ -128,7 +128,7 @@ func computePenalties(st *model.ServerStats, cats []model.Category, probe *model
 		if probe.NXInterception == model.VerdictYes {
 			addPenalty(pens, penaltyNXInterception, w.PenaltyNXInterceptionMs)
 		}
-		if probe.DNSSEC.Validating != model.VerdictYes {
+		if !probe.DNSSEC.Skipped && probe.DNSSEC.Validating != model.VerdictYes {
 			addPenalty(pens, penaltyNoDNSSEC, w.PenaltyNoDNSSECMs)
 		}
 	}

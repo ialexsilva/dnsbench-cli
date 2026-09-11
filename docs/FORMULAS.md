@@ -134,7 +134,7 @@ invalid-response      = PenaltyPerInvalidPctMs   · (invalid    / totalQueries �
 retry                 = PenaltyPerRetryPctMs     · (retried    / totalQueries · 100)
 jitter                = JitterWeight · ( Σ_{c∈C} jitter_c / |C| )
 nxdomain-interception = PenaltyNXInterceptionMs        if NX interception verdict = yes
-no-dnssec             = PenaltyNoDNSSECMs              if DNSSEC validating verdict ≠ yes
+no-dnssec             = PenaltyNoDNSSECMs              if DNSSEC was not skipped and validating verdict ≠ yes
 ```
 
 ```
@@ -166,6 +166,8 @@ Servers are sorted by ascending total; totals within **0.01 ms** of the previous
 The Loss, SERVFAIL, Invalid and Retry columns are milliseconds per percentage point; the next two are flat milliseconds; Jitter is dimensionless.
 
 Custom weights can be merged over these presets per mode with `--weights <file.json>`.
+
+`--no-dnssec` skips DNSSEC checks and forces `PenaltyNoDNSSECMs` to zero in every mode after custom weights are merged. The same effective weights are used for ranking, bootstrap comparisons and reports. Other penalties remain enabled. No characterization penalties apply when the entire probe phase is skipped with `--skip-probe`.
 
 ## Worked ranking example
 

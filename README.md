@@ -109,6 +109,9 @@ it onto your `PATH`, drop the `./` prefix; on Windows use `.\dnsbench.exe`.
 # Benchmark and open a shareable HTML report in the browser when the run finishes
 ./dnsbench run --builtin --open
 
+# Skip DNSSEC checks and exclude the DNSSEC penalty from the ranking
+./dnsbench run --no-dnssec --open
+
 # Characterize servers (DNSSEC and NXDOMAIN) without benchmarking
 ./dnsbench probe --builtin --verbose
 
@@ -191,9 +194,13 @@ The popular domains used by the cached benchmark are stored in [`internal/model/
 
 ## Reports and exports
 
+`--no-dnssec` skips DNSSEC characterization and removes its penalty from every ranking mode, including when using custom `--weights`. Reachability, NXDOMAIN and optional `--extended` checks still run; other ranking penalties still apply. The flag is also available on `dnsbench probe`. It does not disable validation on the resolver itself. To keep DNSSEC checks but remove only their ranking penalty, use `--weights` with `penalty_no_dnssec_ms` set to `0` for the desired mode.
+
+With `--no-dnssec`, the terminal and HTML/text reports state that DNSSEC checks and the penalty are disabled. Server characteristics show `skipped`; JSON records `config.no_dnssec: true` and `dnssec.skipped: true` in probe results. Skipped checks are distinct from an inconclusive (`unknown`) validation result.
+
 The terminal prints a compact report: a one-line run summary, a single ranking (bar · latency cost · loss, with your current DNS marked and statistical ties flagged) and a footer. Lower latency cost is better. A `*` after the cost means penalties are part of it, so the number sits above the measured latency — the HTML report breaks down which penalties and by how much. `--details` adds the per-category metrics table.
 
-For a full, shareable report use `--export html`, or `--open`, which writes the HTML report and opens it in your browser when the run finishes. The file is self-contained — verdict, full ranking, an embedded chart, latency-cost breakdown, server characteristics, detailed metrics and the factual DNS-configuration and comparison sections — so it needs no network and adapts to light or dark themes. Available formats are `json`, `csv`, `txt` and `html`; `--out` sets the directory, `--prefix` the file name, and `--include-raw` keeps per-query samples in the JSON. The CSV has one row per server and category, and closes each row with the selected ranking's `ranking_mode`, `rank`, `cost_base_ms`, `cost_penalty_ms` and `latency_cost_ms` so the ranking can be reproduced in a spreadsheet; servers that never earned a rank leave those cells empty.
+For a full, shareable report use `--export html`, or `--open`, which writes the HTML report and opens it in your browser when the run finishes. The file is self-contained — verdict, full ranking, an embedded chart, latency-cost breakdown, server characteristics, detailed metrics and the factual DNS-configuration and comparison sections — so it needs no network and adapts to light or dark themes. Available formats are `json`, `csv`, `txt` and `html`; `--out` sets the directory, `--prefix` the file name, and `--include-raw` keeps per-query samples in the JSON. The CSV has one row per server and category and includes the selected ranking's `ranking_mode`, `rank`, `cost_base_ms`, `cost_penalty_ms` and `latency_cost_ms` so the ranking can be reproduced in a spreadsheet; servers that never earned a rank leave those cells empty. The final `dnssec_validation` column records `yes`, `no`, `partial`, `unknown`, `skipped` or `not probed`.
 
 ## Measurement pacing
 

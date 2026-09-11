@@ -8,6 +8,27 @@ import (
 	"dnsbench/internal/model"
 )
 
+func TestSkippedDNSSECInTablesAndRunSummary(t *testing.T) {
+	disableColors(t)
+	res := chartFixture()
+	res.Config.NoDNSSEC = true
+	res.Probes = map[string]*model.ProbeResult{}
+	for _, server := range res.Servers {
+		res.Probes[server.ID] = &model.ProbeResult{DNSSEC: model.DNSSECInfo{Skipped: true, Validating: model.VerdictUnknown}}
+	}
+	for _, out := range []string{
+		RenderServersTable(res.Servers, res.Probes, nil),
+		RenderServerCharacteristics(res),
+	} {
+		if strings.Count(out, "skipped") != len(res.Servers) {
+			t.Errorf("table must mark each DNSSEC check as skipped:\n%s", out)
+		}
+	}
+	if out := RenderRunSummary(res); !strings.Contains(out, "DNSSEC checks and penalty disabled") {
+		t.Errorf("run summary omitted DNSSEC setting: %s", out)
+	}
+}
+
 func TestRenderServersTable(t *testing.T) {
 	disableColors(t)
 	servers := []model.Server{

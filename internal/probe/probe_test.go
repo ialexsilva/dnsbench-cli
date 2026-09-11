@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -95,10 +96,12 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 type probeTestQuerier struct {
-	onQuery func()
+	onQuery   func()
+	questions []transport.Question
 }
 
-func (q *probeTestQuerier) Query(context.Context, transport.Question) model.QueryResult {
+func (q *probeTestQuerier) Query(_ context.Context, question transport.Question) model.QueryResult {
+	q.questions = append(q.questions, question)
 	if q.onQuery != nil {
 		q.onQuery()
 	}
@@ -110,6 +113,48 @@ func (q *probeTestQuerier) Query(context.Context, transport.Question) model.Quer
 
 func (*probeTestQuerier) Protocol() model.Protocol { return model.ProtoUDP }
 func (*probeTestQuerier) Close() error             { return nil }
+
+func TestSkipDNSSECKeepsOtherChecks(t *testing.T) {
+	cfg := testConfig("")
+	cfg.SkipDNSSEC = true
+	cfg.Extended = true
+	q := &probeTestQuerier{}
+	cfg.Factory = func(model.Server, transport.Options) (transport.Querier, error) {
+		return q, nil
+	}
+	pr := Run(context.Background(), []model.Server{mockServerEntry("mock", 53)}, cfg)["mock"]
+	if !pr.DNSSEC.Skipped || pr.DNSSEC.Validating != model.VerdictUnknown {
+		t.Fatalf("skipped DNSSEC must remain untested: %+v", pr.DNSSEC)
+	}
+	if !pr.Reachable || pr.SupportsA != model.VerdictYes || len(pr.NXChecks) != 3 || pr.Extended == nil {
+		t.Fatalf("other characterization checks did not run: %+v", pr)
+	}
+	var baselineAAAA, reverse, https bool
+	for _, question := range q.questions {
+		if question.DO || question.CD || question.Name == cfg.BogusDomain ||
+			(question.Name == cfg.SignedDomain && question.Qtype == dns.TypeA) {
+			t.Errorf("DNSSEC query sent with SkipDNSSEC: %+v", question)
+		}
+		baselineAAAA = baselineAAAA || question.Name == cfg.ReachabilityDomain && question.Qtype == dns.TypeAAAA
+		reverse = reverse || question.Qtype == dns.TypePTR
+		https = https || question.Name == cfg.SignedDomain && question.Qtype == dns.TypeHTTPS
+	}
+	if !baselineAAAA || !reverse || !https {
+		t.Fatalf("missing non-DNSSEC queries: %+v", q.questions)
+	}
+}
+
+func TestSkipDNSSECRecordedOnTransportFailure(t *testing.T) {
+	cfg := testConfig("")
+	cfg.SkipDNSSEC = true
+	cfg.Factory = func(model.Server, transport.Options) (transport.Querier, error) {
+		return nil, errors.New("transport unavailable")
+	}
+	pr := Run(context.Background(), []model.Server{{ID: "mock"}}, cfg)["mock"]
+	if !pr.DNSSEC.Skipped || len(pr.Errors) == 0 {
+		t.Fatalf("transport failure lost the skipped status: %+v", pr)
+	}
+}
 
 func TestRunUsesPersistentQuerierForCharacterization(t *testing.T) {
 	cfg := testConfig("")

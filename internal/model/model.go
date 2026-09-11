@@ -10,7 +10,7 @@ import (
 
 const (
 	AppName    = "dnsbench"
-	AppVersion = "0.7.1"
+	AppVersion = "0.8.0"
 )
 
 type Protocol string
@@ -392,6 +392,7 @@ type NXCheck struct {
 }
 
 type DNSSECInfo struct {
+	Skipped             bool    `json:"skipped,omitempty"`
 	ReturnsRRSIG        Verdict `json:"returns_rrsig"`
 	SignedResolves      Verdict `json:"signed_resolves"`
 	BogusServfail       Verdict `json:"bogus_servfail"`
@@ -618,6 +619,7 @@ const (
 )
 
 type BenchConfig struct {
+	NoDNSSEC          bool          `json:"no_dnssec,omitempty"`
 	Mode              Mode          `json:"mode"`
 	Rounds            int           `json:"rounds"`
 	WarmupRounds      int           `json:"warmup_rounds"`

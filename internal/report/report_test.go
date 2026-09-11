@@ -3,7 +3,9 @@ package report
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"encoding/xml"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"dnsbench/internal/model"
+	"dnsbench/internal/rank"
 )
 
 func dist(median, mean, loss, servfail float64, samples []float64) *model.Distribution {
@@ -326,23 +329,26 @@ func TestExportCSV(t *testing.T) {
 	if len(records) != 7 {
 		t.Fatalf("expected header plus 6 rows, got %d records", len(records))
 	}
-	if len(records[0]) != 41 {
-		t.Fatalf("expected 41 columns, got %d", len(records[0]))
+	if len(records[0]) != 42 {
+		t.Fatalf("expected 42 columns, got %d", len(records[0]))
 	}
 	if records[0][0] != "server_id" || records[0][35] != "truncated_pct" {
 		t.Fatalf("pre-existing columns must keep their position: %v", records[0])
 	}
-	if got := records[0][36:]; !reflect.DeepEqual(got, []string{"ranking_mode", "rank", "cost_base_ms", "cost_penalty_ms", "latency_cost_ms"}) {
+	if got := records[0][36:41]; !reflect.DeepEqual(got, []string{"ranking_mode", "rank", "cost_base_ms", "cost_penalty_ms", "latency_cost_ms"}) {
 		t.Fatalf("unexpected ranking columns: %v", got)
 	}
 	seen := map[string]bool{}
 	ranking := map[string][]string{}
 	for _, row := range records[1:] {
-		if len(row) != 41 {
-			t.Fatalf("row has %d columns, expected 41: %v", len(row), row)
+		if len(row) != 42 {
+			t.Fatalf("row has %d columns, expected 42: %v", len(row), row)
 		}
 		seen[row[0]+"|"+row[7]] = true
-		ranking[row[0]] = row[36:]
+		ranking[row[0]] = row[36:41]
+		if records[0][41] != "dnssec_validation" || row[41] != string(testResult().Probes[row[0]].DNSSEC.Validating) {
+			t.Fatalf("unexpected DNSSEC validation column: %v", row)
+		}
 		if !strings.Contains(row[23], ".") {
 			t.Fatalf("median_ms should use dot decimal: %q", row[23])
 		}
@@ -385,12 +391,79 @@ func TestExportCSVLeavesUnrankedServersEmpty(t *testing.T) {
 		if row[0] != "ghost" {
 			continue
 		}
-		if got := row[36:]; !reflect.DeepEqual(got, []string{"browsing", "", "", "", ""}) {
+		if got := row[36:41]; !reflect.DeepEqual(got, []string{"browsing", "", "", "", ""}) {
 			t.Fatalf("unranked server must have empty ranking cells, got %v", got)
+		}
+		if row[41] != "not probed" {
+			t.Fatalf("unprobed server DNSSEC = %q", row[41])
 		}
 		return
 	}
 	t.Fatal("no row emitted for the unranked server")
+}
+
+func TestExportsWithDNSSECDisabled(t *testing.T) {
+	res := testResult()
+	res.Config.NoDNSSEC = true
+	for _, p := range res.Probes {
+		p.DNSSEC = model.DNSSECInfo{Skipped: true, Validating: model.VerdictUnknown}
+	}
+	for mode, weights := range res.Weights {
+		weights.PenaltyNoDNSSECMs = 0
+		res.Weights[mode] = weights
+		res.Scores[mode] = rank.ScoreServers(res.Stats, res.Probes, res.Config.Categories, weights, mode)
+	}
+	for name, export := range map[string]func(io.Writer) error{
+		"text": func(w io.Writer) error { return ExportText(w, res) },
+		"html": func(w io.Writer) error { return ExportHTML(w, res, model.RankBrowsing) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := export(&buf); err != nil {
+				t.Fatal(err)
+			}
+			out := buf.String()
+			if !strings.Contains(out, "DNSSEC checks and penalty disabled (--no-dnssec)") || !strings.Contains(out, "no DNSSEC 0.0") {
+				t.Fatalf("report omitted disabled checks or zero penalty:\n%s", out)
+			}
+			if name == "html" {
+				if strings.Count(out, ">skipped</td>") != len(res.Probes) || strings.Contains(out, ">not validating<") {
+					t.Fatal("HTML must distinguish skipped DNSSEC from failed validation")
+				}
+			}
+		})
+	}
+	var buf bytes.Buffer
+	if err := ExportJSON(&buf, res, false); err != nil {
+		t.Fatal(err)
+	}
+	var decoded model.RunResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Config.NoDNSSEC || !decoded.Probes["system-1"].DNSSEC.Skipped {
+		t.Fatal("JSON lost the disabled/skipped DNSSEC settings")
+	}
+	for _, scores := range decoded.Scores {
+		for _, score := range scores {
+			if _, ok := score.Penalties["no-dnssec"]; ok {
+				t.Fatal("JSON still contains a DNSSEC penalty")
+			}
+		}
+	}
+	buf.Reset()
+	if err := ExportCSV(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(&buf).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows[1:] {
+		if row[41] != "skipped" {
+			t.Fatalf("CSV DNSSEC validation = %q, want skipped", row[41])
+		}
+	}
 }
 
 func TestChartSVGIsValidXML(t *testing.T) {

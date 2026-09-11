@@ -46,6 +46,7 @@ func Run(ctx context.Context, servers []model.Server, cfg Config) map[string]*mo
 
 func probeServer(ctx context.Context, srv model.Server, cfg Config, factory transport.Factory) *model.ProbeResult {
 	res := newResult(srv.ID)
+	res.DNSSEC.Skipped = cfg.SkipDNSSEC
 	querier, err := factory(srv, transport.Options{Timeout: cfg.Timeout, Persistent: true})
 	if err != nil {
 		res.Errors = append(res.Errors, "could not set up transport: "+err.Error())
@@ -91,7 +92,9 @@ func (p *prober) run(ctx context.Context) {
 	if p.canceled(ctx) {
 		return
 	}
-	p.checkDNSSEC(ctx)
+	if !p.cfg.SkipDNSSEC {
+		p.checkDNSSEC(ctx)
+	}
 	if p.canceled(ctx) {
 		return
 	}

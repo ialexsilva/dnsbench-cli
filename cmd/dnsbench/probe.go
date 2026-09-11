@@ -221,7 +221,7 @@ func filterOnly(servers []model.Server, only []string) []model.Server {
 
 func newProbeCmd() *cobra.Command {
 	var sel selectionFlags
-	var extended, verbose bool
+	var extended, verbose, noDNSSEC bool
 	var timeout time.Duration
 	var concurrency int
 	var jsonPath string
@@ -248,6 +248,7 @@ validation and NXDOMAIN handling. No latency benchmark is run; use
 			}
 			cfg := probe.DefaultConfig()
 			cfg.Extended = extended
+			cfg.SkipDNSSEC = noDNSSEC
 			if timeout > 0 {
 				cfg.Timeout = timeout
 			}
@@ -280,6 +281,7 @@ validation and NXDOMAIN handling. No latency benchmark is run; use
 	}
 	registerSelectionFlags(cmd, &sel)
 	cmd.Flags().BoolVar(&extended, "extended", false, "run extended checks (DNS64, QNAME minimization, HTTPS records)")
+	cmd.Flags().BoolVar(&noDNSSEC, "no-dnssec", false, "skip DNSSEC checks")
 	cmd.Flags().DurationVar(&timeout, "timeout", base.Timeout, "timeout per query")
 	cmd.Flags().IntVar(&concurrency, "concurrency", base.Concurrency, "how many resolvers to probe in parallel")
 	cmd.Flags().StringVar(&jsonPath, "json", "", "write raw probe results to this JSON file")

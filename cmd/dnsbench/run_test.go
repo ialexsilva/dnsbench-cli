@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"dnsbench/internal/model"
+
+	"github.com/spf13/cobra"
 )
 
 func TestRunCommandModernDefaults(t *testing.T) {
@@ -53,6 +56,47 @@ func TestProbeCommandHasNoPacingFlag(t *testing.T) {
 	cmd := newProbeCmd()
 	if got := cmd.Flags().Lookup("pace"); got != nil {
 		t.Fatalf("probe unexpectedly exposes --pace: %+v", got)
+	}
+}
+
+func TestNoDNSSECFlagDefaultsOff(t *testing.T) {
+	for _, cmd := range []*cobra.Command{newRunCmd(), newProbeCmd()} {
+		flag := cmd.Flags().Lookup("no-dnssec")
+		if flag == nil || flag.DefValue != "false" {
+			t.Fatalf("%s must expose --no-dnssec defaulting to false", cmd.Name())
+		}
+		if err := cmd.ParseFlags([]string{"--no-dnssec"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestNoDNSSECOverridesCustomWeights(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weights.json")
+	if err := os.WriteFile(path, []byte(`{"latency":{"penalty_no_dnssec_ms":99,"penalty_nx_interception_ms":17}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, weightsFile := range []string{"", path} {
+		flags := runFlags{weightsFile: weightsFile}
+		before, err := loadRunWeights(&flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags.noDNSSEC = true
+		after, err := loadRunWeights(&flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for mode, want := range before {
+			want.PenaltyNoDNSSECMs = 0
+			if !reflect.DeepEqual(after[mode], want) {
+				t.Errorf("%s: DNSSEC override changed other weights: %+v", mode, after[mode])
+			}
+		}
+		cfg, _ := buildBenchConfig(&flags, model.ModeStandard, model.SessionPersistent)
+		if !cfg.NoDNSSEC {
+			t.Fatal("run configuration lost --no-dnssec")
+		}
 	}
 }
 

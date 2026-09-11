@@ -161,6 +161,8 @@ The server's `NX interception` verdict is **yes** if any check was intercepted, 
 
 ## DNSSEC: the DO/CD matrix
 
+`--no-dnssec` (on `run` or `probe`) skips the three DNSSEC queries below while retaining the other characterization checks. Skipped results carry `dnssec.skipped: true`; their verdicts remain `unknown` and reports label them `skipped`. On `run`, the flag also sets the DNSSEC penalty to zero in every ranking mode, overriding custom weights. It does not change the resolver's own validation behavior or remove other ranking penalties. `--skip-probe` skips the entire characterization phase instead.
+
 Three probe queries build the matrix (DO = DNSSEC OK bit, CD = Checking Disabled bit):
 
 | Query | DO | CD | What it observes |

@@ -273,6 +273,36 @@ func TestNoDNSSECPenaltyExact(t *testing.T) {
 	}
 }
 
+func TestSkippedDNSSECRemovesOnlyDNSSECPenalty(t *testing.T) {
+	stats := map[string]*model.ServerStats{
+		"s1": activeStats("s1", map[model.Category]*model.Distribution{
+			model.CatCached: {Count: 10, Answered: 9, MedianMs: 10, JitterMs: 2},
+		}),
+	}
+	for mode, weights := range Presets() {
+		t.Run(string(mode), func(t *testing.T) {
+			probe := cleanProbe("s1")
+			probe.DNSSEC.Validating = model.VerdictUnknown
+			probe.NXInterception = model.VerdictYes
+			probes := map[string]*model.ProbeResult{"s1": probe}
+			before := findScore(t, ScoreServers(stats, probes, []model.Category{model.CatCached}, weights, mode), "s1")
+			probe.DNSSEC.Skipped = true
+			after := findScore(t, ScoreServers(stats, probes, []model.Category{model.CatCached}, weights, mode), "s1")
+			if _, ok := after.Penalties[penaltyNoDNSSEC]; ok {
+				t.Fatal("skipped DNSSEC was penalized")
+			}
+			if !almostEqual(before.TotalMs-after.TotalMs, weights.PenaltyNoDNSSECMs) {
+				t.Fatalf("unexpected score change: before=%+v after=%+v", before, after)
+			}
+			for _, key := range []string{penaltyLoss, penaltyJitter, penaltyNXInterception} {
+				if after.Penalties[key] <= 0 || after.Penalties[key] != before.Penalties[key] {
+					t.Errorf("%s penalty changed: before=%v after=%v", key, before.Penalties[key], after.Penalties[key])
+				}
+			}
+		})
+	}
+}
+
 func TestZeroPenaltiesStayOutOfMap(t *testing.T) {
 	w := singleCatWeights("median")
 	w.PenaltyPerLossPctMs = 5
