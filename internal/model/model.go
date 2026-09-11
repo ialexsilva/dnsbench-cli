@@ -10,7 +10,7 @@ import (
 
 const (
 	AppName    = "dnsbench"
-	AppVersion = "0.7.1"
+	AppVersion = "0.8.0"
 )
 
 type Protocol string
